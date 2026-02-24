@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Release" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="KvcForensic.vcxproj" Id="e6f8d4a1-1234-5678-90ab-cdef12345678" />
+</Solution>

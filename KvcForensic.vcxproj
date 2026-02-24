@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <ProjectGuid>{E6F8D4A1-1234-5678-90AB-CDEF12345678}</ProjectGuid>
+    <RootNamespace>KvcForensic</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>x64\Release\</OutDir>
+    <IntDir>obj\KvcForensic\x64\Release\</IntDir>
+    <TargetName>KvcForensic</TargetName>
+    <SubSystem>Windows</SubSystem>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/utf-8 /permissive- /FS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>user32.lib;gdi32.lib;comctl32.lib;shell32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\analysis\JsonReportBuilder.cpp" />
+    <ClCompile Include="src\analysis\SafeAnalysisReport.cpp" />
+    <ClCompile Include="src\analysis\TextReportBuilder.cpp" />
+    <ClCompile Include="src\core\MemoryReader.cpp" />
+    <ClCompile Include="src\core\VirtualMemory.cpp" />
+    <ClCompile Include="src\lsa\LogonSessionWalker.cpp" />
+    <ClCompile Include="src\lsa\TemplateRegistry.cpp" />
+    <ClCompile Include="src\lsa\LsaStructureParser.cpp" />
+    <ClCompile Include="src\KvcForensicMain.cpp" />
+    <ClCompile Include="src\KvcForensicWindow.cpp" />
+    <ClCompile Include="src\LsaTemplateSelector.cpp" />
+    <ClCompile Include="src\minidump\MinidumpParser.cpp" />
+    <ClCompile Include="src\security\BuildLayout.cpp" />
+    <ClCompile Include="src\security\KerberosPackage.cpp" />
+    <ClCompile Include="src\security\MsvPackage.cpp" />
+    <ClCompile Include="src\security\MsvCredentials.cpp" />
+    <ClCompile Include="src\security\LsaSecretsExtractor.cpp" />
+    <ClCompile Include="src\security\SecurityAnalysisEngine.cpp" />
+    <ClCompile Include="src\security\SecurityPackageRegistry.cpp" />
+    <ClCompile Include="src\security\TrustedInstaller.cpp" />
+    <ClCompile Include="src\security\WDigestPackage.cpp" />
+    <ClCompile Include="src\security\DpapiPackage.cpp" />
+    <ClCompile Include="src\WindowsBuildInfo.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\analysis\JsonReportBuilder.h" />
+    <ClInclude Include="src\analysis\ReportRenderer.h" />
+    <ClInclude Include="src\analysis\SafeAnalysisReport.h" />
+    <ClInclude Include="src\analysis\TextReportBuilder.h" />
+    <ClInclude Include="src\core\BinaryUtils.h" />
+    <ClInclude Include="src\core\HandleGuards.h" />
+    <ClInclude Include="src\core\HexUtils.h" />
+    <ClInclude Include="src\core\MemoryReader.h" />
+    <ClInclude Include="src\core\MemoryUtils.h" />
+    <ClInclude Include="src\core\StringUtils.h" />
+    <ClInclude Include="src\core\TextEncoding.h" />
+    <ClInclude Include="src\core\VirtualMemory.h" />
+    <ClInclude Include="src\lsa\LogonSessionWalker.h" />
+    <ClInclude Include="src\lsa\TemplateRegistry.h" />
+    <ClInclude Include="src\lsa\LsaStructureParser.h" />
+    <ClInclude Include="src\lsa\LsaStructures.h" />
+    <ClInclude Include="src\KvcForensicWindow.h" />
+    <ClInclude Include="src\LsaTemplateSelector.h" />
+    <ClInclude Include="src\minidump\DbgHelpTypes.h" />
+    <ClInclude Include="src\minidump\MinidumpParser.h" />
+    <ClInclude Include="src\security\BuildLayout.h" />
+    <ClInclude Include="src\security\ISecurityPackage.h" />
+    <ClInclude Include="src\security\KerberosPackage.h" />
+    <ClInclude Include="src\security\MsvPackage.h" />
+    <ClInclude Include="src\security\MsvCredentials.h" />
+    <ClInclude Include="src\security\LsaSecretsExtractor.h" />
+    <ClInclude Include="src\security\SecurityAnalysisEngine.h" />
+    <ClInclude Include="src\security\SecurityPackageRegistry.h" />
+    <ClInclude Include="src\security\SecurityPackageReport.h" />
+    <ClInclude Include="src\security\TrustedInstaller.h" />
+    <ClInclude Include="src\security\WDigestPackage.h" />
+    <ClInclude Include="src\security\DpapiPackage.h" />
+    <ClInclude Include="src\WindowsBuildInfo.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="source">
+      <UniqueIdentifier>{A4F83C6E-1C47-4AB8-A3A5-5A3DE4EBC0C1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\analysis">
+      <UniqueIdentifier>{9E09100E-9F24-4E6C-BB15-4C68456E9C64}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\core">
+      <UniqueIdentifier>{D7B5C062-1A7B-4439-A8C6-63D3BAA24F15}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\lsa">
+      <UniqueIdentifier>{63B52303-C56A-4F3C-8D1A-C2A86A1B4EC5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\minidump">
+      <UniqueIdentifier>{DCC4F05D-BF72-4BA7-977D-A4AB590FD8A5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source\security">
+      <UniqueIdentifier>{2C24BBA7-9DE4-437B-8F28-4ED09EA1603A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="headers">
+      <UniqueIdentifier>{1E5F0A6F-55B7-4BBF-A2F7-9BEAB2E68F4F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="headers\analysis">
+      <UniqueIdentifier>{3F214F97-B640-4D27-8867-6A97A26817E9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="headers\core">
+      <UniqueIdentifier>{4C760A34-AD28-4D19-A57E-615FE8C6E60C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="headers\lsa">
+      <UniqueIdentifier>{1CF704FD-D8E7-4F17-8F2B-275BD222A3A9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="headers\minidump">
+      <UniqueIdentifier>{DD4D564D-53EA-4FA7-A8A4-CF35D3319D58}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="headers\security">
+      <UniqueIdentifier>{AB2CFB70-4AE7-4BDB-BD7E-84E87AFC6B65}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClCompile Include="src\analysis\JsonReportBuilder.cpp">
+      <Filter>source\analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="src\analysis\SafeAnalysisReport.cpp">
+      <Filter>source\analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="src\analysis\TextReportBuilder.cpp">
+      <Filter>source\analysis</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\MemoryReader.cpp">
+      <Filter>source\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\VirtualMemory.cpp">
+      <Filter>source\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lsa\LogonSessionWalker.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lsa\TemplateRegistry.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lsa\LsaStructureParser.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
+    <ClCompile Include="src\KvcForensicMain.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="src\KvcForensicWindow.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="src\LsaTemplateSelector.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="src\minidump\MinidumpParser.cpp">
+      <Filter>source\minidump</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\BuildLayout.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\KerberosPackage.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\DpapiPackage.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\LsaSecretsExtractor.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\MsvCredentials.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\MsvPackage.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\SecurityAnalysisEngine.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\SecurityPackageRegistry.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\TrustedInstaller.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\WDigestPackage.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\WindowsBuildInfo.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClInclude Include="src\analysis\JsonReportBuilder.h">
+      <Filter>headers\analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\ReportRenderer.h">
+      <Filter>headers\analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\SafeAnalysisReport.h">
+      <Filter>headers\analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="src\analysis\TextReportBuilder.h">
+      <Filter>headers\analysis</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\HandleGuards.h">
+      <Filter>headers\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\BinaryUtils.h">
+      <Filter>headers\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\HexUtils.h">
+      <Filter>headers\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\MemoryReader.h">
+      <Filter>headers\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\MemoryUtils.h">
+      <Filter>headers\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\StringUtils.h">
+      <Filter>headers\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\TextEncoding.h">
+      <Filter>headers\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\VirtualMemory.h">
+      <Filter>headers\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lsa\LogonSessionWalker.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lsa\TemplateRegistry.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lsa\LsaStructureParser.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lsa\LsaStructures.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
+    <ClInclude Include="src\KvcForensicWindow.h">
+      <Filter>headers</Filter>
+    </ClInclude>
+    <ClInclude Include="src\LsaTemplateSelector.h">
+      <Filter>headers</Filter>
+    </ClInclude>
+    <ClInclude Include="src\minidump\DbgHelpTypes.h">
+      <Filter>headers\minidump</Filter>
+    </ClInclude>
+    <ClInclude Include="src\minidump\MinidumpParser.h">
+      <Filter>headers\minidump</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\BuildLayout.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\ISecurityPackage.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\KerberosPackage.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\DpapiPackage.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\LsaSecretsExtractor.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\MsvCredentials.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\MsvPackage.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\SecurityAnalysisEngine.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\SecurityPackageRegistry.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\SecurityPackageReport.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\TrustedInstaller.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\WDigestPackage.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\WindowsBuildInfo.h">
+      <Filter>headers</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
