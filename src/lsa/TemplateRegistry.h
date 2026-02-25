@@ -22,6 +22,8 @@ struct MsvTemplateSpec {
     std::size_t session_domain_offset = 0;
     std::size_t session_sid_ptr_offset = 0;
     std::size_t session_credentials_ptr_offset = 0;
+    // Offset of the CredMan pointer inside MSLSA_LOGON_SESSION. 0 = not supported.
+    std::size_t session_credman_ptr_offset = 0;
 
     bool parser_support = false;
 };

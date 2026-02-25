@@ -92,9 +92,6 @@ bool AppendMetadata(std::wstringstream& ss, const SafeAnalysisReport& report) {
     ss << L"\r\n";
 
     ss << L"Security Packages\r\n";
-    ss << L"- Layout build: " << report.security.layout.build_number << L"\r\n";
-    ss << L"- Layout configured: " << (report.security.layout_configured ? L"yes" : L"no") << L"\r\n";
-    ss << L"- Layout notes: " << report.security.layout.notes << L"\r\n";
     for (const auto& package : report.security.package_reports) {
         ss << L"- " << package.package_name
            << L": module_present=" << (package.module_present ? L"yes" : L"no")

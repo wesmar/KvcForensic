@@ -1,4 +1,5 @@
 #include "KvcForensicWindow.h"
+#include "Resource.h"
 
 #include "analysis/SafeAnalysisReport.h"
 #include "core/HexUtils.h"
@@ -38,13 +39,6 @@ constexpr wchar_t kWndClass[]    = L"KvcForensicMainWnd";
 constexpr int     kSplitterW     = 5;
 constexpr int     kSplitterMin   = 120;
 
-// Menu command IDs
-constexpr WORD IDM_FILE_OPEN  = 0x0101;
-constexpr WORD IDM_FILE_EXIT  = 0x0103;
-constexpr WORD IDM_HELP_ABOUT = 0x0201;
-constexpr WORD IDM_VIEW_ADVANCED = 0x0301;
-constexpr WORD IDM_EDIT_COPY     = 0x0401;
-
 // Status bar parts
 constexpr int SB_FILE  = 0;
 constexpr int SB_BUILD = 1;
@@ -79,20 +73,6 @@ std::wstring ToWide(const std::string& s) {
     return std::wstring(s.begin(), s.end());
 }
 
-void LoadShell32IconsByIndex(int index, HICON& large_icon, HICON& small_icon) {
-    wchar_t sysdir[MAX_PATH] = {};
-    const UINT n = ::GetSystemDirectoryW(sysdir, MAX_PATH);
-    if (n == 0 || n >= MAX_PATH) return;
-
-    std::wstring shell32_path = std::wstring(sysdir) + L"\\shell32.dll";
-    HICON large_icon_tmp = nullptr;
-    HICON small_icon_tmp = nullptr;
-    UINT extracted = ::ExtractIconExW(shell32_path.c_str(), index, &large_icon_tmp, &small_icon_tmp, 1);
-    if (extracted > 0) {
-        if (large_icon_tmp) large_icon = large_icon_tmp;
-        if (small_icon_tmp) small_icon = small_icon_tmp;
-    }
-}
 
 bool StartsWithI(const std::wstring& text, const wchar_t* prefix) {
     const std::size_t n = std::wcslen(prefix);
@@ -277,16 +257,18 @@ bool KvcForensicWindow::Create(HINSTANCE instance, int nCmdShow) {
     icc.dwICC  = ICC_TREEVIEW_CLASSES | ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES;
     ::InitCommonControlsEx(&icc);
 
+    hInstance_ = instance;
+
+    icon_big_   = ::LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP_ICON));
+    icon_small_ = reinterpret_cast<HICON>(::LoadImageW(instance,
+        MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
+
     WNDCLASSEXW wc{};
     wc.cbSize        = sizeof(wc);
     wc.lpfnWndProc   = &KvcForensicWindow::WndProc;
     wc.hInstance     = instance;
     wc.hCursor       = ::LoadCursorW(nullptr, IDC_ARROW);
-    LoadShell32IconsByIndex(104, icon_big_, icon_small_);
-    if (!icon_big_ || !icon_small_) {
-        LoadShell32IconsByIndex(103, icon_big_, icon_small_);
-    }
-    wc.hIcon         = icon_big_ ? icon_big_ : ::LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIcon         = icon_big_   ? icon_big_   : ::LoadIconW(nullptr, IDI_APPLICATION);
     wc.hIconSm       = icon_small_ ? icon_small_ : ::LoadIconW(nullptr, IDI_APPLICATION);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
     wc.lpszClassName = kWndClass;
@@ -459,7 +441,7 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
         if (analysis_thread_.joinable()) analysis_thread_.join();
         if (font_)   ::DeleteObject(font_);
         if (bg_brush_) ::DeleteObject(bg_brush_);
-        if (accel_)  ::DestroyAcceleratorTable(accel_);
+        // accel_ loaded via LoadAcceleratorsW -- owned by the OS, not destroyed manually
         if (icon_big_) ::DestroyIcon(icon_big_);
         if (icon_small_) ::DestroyIcon(icon_small_);
         ::PostQuitMessage(0);
@@ -536,30 +518,13 @@ void KvcForensicWindow::CreateControls(HWND hwnd) {
 }
 
 void KvcForensicWindow::CreateAppMenu() {
-    HMENU hFile = ::CreatePopupMenu();
-    ::AppendMenuW(hFile, MF_STRING, IDM_FILE_OPEN, L"Open Dump...\tCtrl+O");
-    ::AppendMenuW(hFile, MF_SEPARATOR, 0, nullptr);
-    ::AppendMenuW(hFile, MF_STRING, IDM_FILE_EXIT, L"Exit");
+    HMENU hBar = ::LoadMenuW(hInstance_, MAKEINTRESOURCEW(IDR_MAIN_MENU));
+    if (hBar) {
+        ::SetMenu(hwnd_, hBar);
+        view_menu_ = ::GetSubMenu(hBar, 1); // View is at index 1 (File=0, View=1, Help=2)
+    }
 
-    HMENU hHelp = ::CreatePopupMenu();
-    ::AppendMenuW(hHelp, MF_STRING, IDM_HELP_ABOUT, L"About");
-
-    view_menu_ = ::CreatePopupMenu();
-    ::AppendMenuW(view_menu_, MF_STRING, IDM_VIEW_ADVANCED,
-        L"Advanced (show all accounts)");
-
-    HMENU hBar = ::CreateMenu();
-    ::AppendMenuW(hBar, MF_POPUP, reinterpret_cast<UINT_PTR>(hFile), L"&File");
-    ::AppendMenuW(hBar, MF_POPUP, reinterpret_cast<UINT_PTR>(view_menu_), L"&View");
-    ::AppendMenuW(hBar, MF_POPUP, reinterpret_cast<UINT_PTR>(hHelp), L"&Help");
-    ::SetMenu(hwnd_, hBar);
-
-    // Accelerator table
-    ACCEL acc[] = {
-        { FVIRTKEY | FCONTROL, 'O', IDM_FILE_OPEN },
-        { FVIRTKEY | FCONTROL, 'C', IDM_EDIT_COPY },
-    };
-    accel_ = ::CreateAcceleratorTableW(acc, 2);
+    accel_ = ::LoadAcceleratorsW(hInstance_, MAKEINTRESOURCEW(IDA_MAIN));
 }
 
 void KvcForensicWindow::LayoutControls(int w, int h) {
@@ -603,16 +568,41 @@ void KvcForensicWindow::ApplyTheme() {
     BOOL dark = is_dark_mode_;
     ::DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
 
-    const wchar_t* theme = is_dark_mode_ ? L"DarkMode_Explorer" : L"Explorer";
-    if (tree_)   ::SetWindowTheme(tree_,   theme, nullptr);
-    if (detail_) ::SetWindowTheme(detail_, theme, nullptr);
-
-    if (is_dark_mode_)
+    if (is_dark_mode_) {
+        constexpr COLORREF clrBg   = RGB(32, 32, 32);
+        constexpr COLORREF clrText = RGB(255, 255, 255);
         bg_brush_ = ::CreateSolidBrush(RGB(40, 40, 40));
-    else
+        if (tree_) {
+            ::SetWindowTheme(tree_, L"DarkMode_Explorer", nullptr);
+            TreeView_SetBkColor(tree_, clrBg);
+            TreeView_SetTextColor(tree_, clrText);
+        }
+        if (detail_) {
+            ::SetWindowTheme(detail_, L"DarkMode_Explorer", nullptr);
+            ListView_SetBkColor(detail_, clrBg);
+            ListView_SetTextBkColor(detail_, clrBg);
+            ListView_SetTextColor(detail_, clrText);
+            HWND hdr = ListView_GetHeader(detail_);
+            if (hdr) ::SetWindowTheme(hdr, L"DarkMode_Header", nullptr);
+        }
+    } else {
         bg_brush_ = ::CreateSolidBrush(RGB(220, 220, 220));
+        if (tree_) {
+            ::SetWindowTheme(tree_, L"Explorer", nullptr);
+            TreeView_SetBkColor(tree_, static_cast<COLORREF>(-1));
+            TreeView_SetTextColor(tree_, static_cast<COLORREF>(-1));
+        }
+        if (detail_) {
+            ::SetWindowTheme(detail_, L"Explorer", nullptr);
+            ListView_SetBkColor(detail_, CLR_NONE);
+            ListView_SetTextBkColor(detail_, CLR_NONE);
+            ListView_SetTextColor(detail_, static_cast<COLORREF>(-1));
+            HWND hdr = ListView_GetHeader(detail_);
+            if (hdr) ::SetWindowTheme(hdr, L"Header", nullptr);
+        }
+    }
 
-    ::InvalidateRect(hwnd_, nullptr, TRUE);
+    ::RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 
 // ---------------------------------------------------------------------------

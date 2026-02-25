@@ -61,8 +61,6 @@ SafeAnalysisReport SafeAnalysisEngine::AnalyzeFile(
     if (build == 0 && report.dump.system_info.has_value() && report.dump.system_info->valid) {
         build = report.dump.system_info->build;
     }
-    report.selected_template = template_select::SelectTemplateForBuild(build);
-
     core::MemoryReader reader;
     std::span<const std::byte> mapped_data{};
     if (reader.Open(dump_path)) {
@@ -70,23 +68,16 @@ SafeAnalysisReport SafeAnalysisEngine::AnalyzeFile(
     }
 
     security::SecurityAnalysisEngine security_engine;
-    report.security = security_engine.Analyze(mapped_data, report.dump, build);
+    report.security = security_engine.Analyze(mapped_data, report.dump);
 
     if (mapped_data.size() > 0 && !report.dump.memory_ranges.empty()) {
         core::VirtualMemory vmem(mapped_data, report.dump.memory_ranges);
         lsa::LogonSessionWalker walker(vmem, report.dump);
-        if (walker.Initialize(build)) {
-            auto sessions = walker.Walk();
-
-            for (auto& s : sessions) {
-                walker.ExtractCredentials(s);
-                walker.ExtractCredmanCredentials(s);
-            }
-            walker.WalkWdigestList(sessions);
-            walker.WalkKerberosAvl(sessions);
-            walker.WalkDpapiList(sessions);
-
-            report.sessions = sessions;
+        const bool initialized = walker.Initialize(build);
+        report.selected_template.template_name      = walker.GetTemplateName();
+        report.selected_template.min_supported_build = walker.GetTemplateMinBuild();
+        if (initialized) {
+            report.sessions = walker.Walk();
 
             if (walker.GetSecretsExtractor() && walker.GetSecretsExtractor()->IsInitialized()) {
                 report.decryption_active = true;

@@ -61,6 +61,7 @@ private:
     static NodeType  GetNodeType(LPARAM p);
     static int       GetNodeIndex(LPARAM p);
 
+    HINSTANCE hInstance_  = nullptr;
     HWND   hwnd_       = nullptr;
     HWND   tree_       = nullptr;
     HWND   detail_     = nullptr;

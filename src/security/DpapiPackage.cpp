@@ -12,10 +12,8 @@ std::wstring DpapiPackage::Name() const {
 }
 
 void DpapiPackage::SetContext(
-    const minidump::MinidumpMetadata* metadata,
-    const BuildLayout* layout) {
+    const minidump::MinidumpMetadata* metadata) {
     metadata_ = metadata;
-    layout_ = layout;
 }
 
 void DpapiPackage::Reset() {

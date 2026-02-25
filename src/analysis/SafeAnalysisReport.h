@@ -1,19 +1,27 @@
 #pragma once
 
-#include "LsaTemplateSelector.h"
 #include "lsa/LogonSessionWalker.h"
 #include "minidump/MinidumpParser.h"
 #include "security/SecurityAnalysisEngine.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace KvcForensic::analysis {
 
+// Metadata about the LSA template selected for the analyzed dump.
+// Populated from the active MsvTemplateSpec after walker initialization.
+struct LsaTemplateMetadata {
+    std::wstring  template_name;
+    std::uint32_t min_supported_build = 0;
+    std::wstring  description;         // reserved for future use
+};
+
 struct SafeAnalysisReport {
     minidump::MinidumpMetadata dump;
-    template_select::LsaTemplateMetadata selected_template;
+    LsaTemplateMetadata selected_template;
     security::SecurityAnalysisResult security;
     std::vector<lsa::LogonSession> sessions;
     bool decryption_active = false;

@@ -34,21 +34,30 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/utf-8 /permissive- /FS %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalDependencies>user32.lib;gdi32.lib;comctl32.lib;shell32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>/BREPRO %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\KvcForensic.rc">
+      <AdditionalIncludeDirectories>resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resources\Resource.h" />
+  </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\analysis\JsonReportBuilder.cpp" />
     <ClCompile Include="src\analysis\SafeAnalysisReport.cpp" />
@@ -56,13 +65,16 @@
     <ClCompile Include="src\core\MemoryReader.cpp" />
     <ClCompile Include="src\core\VirtualMemory.cpp" />
     <ClCompile Include="src\lsa\LogonSessionWalker.cpp" />
+    <ClCompile Include="src\lsa\LsaReaderUtils.cpp" />
+    <ClCompile Include="src\lsa\MsvWalker.cpp" />
+    <ClCompile Include="src\lsa\WdigestWalker.cpp" />
+    <ClCompile Include="src\lsa\KerberosWalker.cpp" />
+    <ClCompile Include="src\lsa\DpapiWalker.cpp" />
     <ClCompile Include="src\lsa\TemplateRegistry.cpp" />
     <ClCompile Include="src\lsa\LsaStructureParser.cpp" />
     <ClCompile Include="src\KvcForensicMain.cpp" />
     <ClCompile Include="src\KvcForensicWindow.cpp" />
-    <ClCompile Include="src\LsaTemplateSelector.cpp" />
     <ClCompile Include="src\minidump\MinidumpParser.cpp" />
-    <ClCompile Include="src\security\BuildLayout.cpp" />
     <ClCompile Include="src\security\KerberosPackage.cpp" />
     <ClCompile Include="src\security\MsvPackage.cpp" />
     <ClCompile Include="src\security\MsvCredentials.cpp" />
@@ -88,14 +100,17 @@
     <ClInclude Include="src\core\TextEncoding.h" />
     <ClInclude Include="src\core\VirtualMemory.h" />
     <ClInclude Include="src\lsa\LogonSessionWalker.h" />
+    <ClInclude Include="src\lsa\LsaReaderUtils.h" />
+    <ClInclude Include="src\lsa\MsvWalker.h" />
+    <ClInclude Include="src\lsa\WdigestWalker.h" />
+    <ClInclude Include="src\lsa\KerberosWalker.h" />
+    <ClInclude Include="src\lsa\DpapiWalker.h" />
     <ClInclude Include="src\lsa\TemplateRegistry.h" />
     <ClInclude Include="src\lsa\LsaStructureParser.h" />
     <ClInclude Include="src\lsa\LsaStructures.h" />
     <ClInclude Include="src\KvcForensicWindow.h" />
-    <ClInclude Include="src\LsaTemplateSelector.h" />
     <ClInclude Include="src\minidump\DbgHelpTypes.h" />
     <ClInclude Include="src\minidump\MinidumpParser.h" />
-    <ClInclude Include="src\security\BuildLayout.h" />
     <ClInclude Include="src\security\ISecurityPackage.h" />
     <ClInclude Include="src\security\KerberosPackage.h" />
     <ClInclude Include="src\security\MsvPackage.h" />

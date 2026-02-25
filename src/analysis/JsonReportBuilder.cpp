@@ -173,11 +173,6 @@ std::wstring BuildJsonReport(const SafeAnalysisReport& report) {
     ss << L"      \"min_build\": "   << report.selected_template.min_supported_build << L",\n";
     ss << L"      \"description\": " << JStr(report.selected_template.description) << L"\n";
     ss << L"    },\n";
-    ss << L"    \"security_layout\": {\n";
-    ss << L"      \"build\": "      << report.security.layout.build_number << L",\n";
-    ss << L"      \"configured\": " << (report.security.layout_configured ? L"true" : L"false") << L",\n";
-    ss << L"      \"notes\": "      << JStr(report.security.layout.notes) << L"\n";
-    ss << L"    },\n";
     ss << L"    \"header\": {\n";
     ss << L"      \"signature\": \""    << HexU32(report.dump.signature)  << L"\",\n";
     ss << L"      \"stream_count\": "  << report.dump.stream_count        << L",\n";

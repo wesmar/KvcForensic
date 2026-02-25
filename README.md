@@ -132,7 +132,7 @@ Both formats are handled transparently during extraction.
 
 ### Kerberos AVL walk
 
-Kerberos stores sessions in an `RTL_AVL_TABLE`. The tree is traversed with an iterative DFS using an explicit `std::vector` stack rather than recursion, eliminating any risk of stack overflow on deep or corrupted trees. Visited nodes are tracked in a `std::set<uint64_t>`. For each node, the `OrderedPointer` field at node+32 yields the session pointer. The LUID is read at session+64; if that value does not match any known session LUID, a fallback probe over offsets {56, 48, 72, 40, 32} is performed.
+Kerberos stores sessions in an `RTL_AVL_TABLE`. The tree is traversed with an iterative DFS using an explicit `std::vector` stack rather than recursion, eliminating any risk of stack overflow on deep or corrupted trees. Visited nodes are tracked in a `std::unordered_set<uint64_t>`. For each node, the `OrderedPointer` field at node+32 yields the session pointer. The LUID is read at session+64; if that value does not match any known session LUID, a fallback probe over offsets {56, 48, 72, 40, 32} is performed.
 
 Kerberos ticket lists (three lists per session at offsets +280, +304, +328 in `KIWI_KERBEROS_LOGON_SESSION_24H2`) are extracted per session. Ticket metadata includes service name, target name, client name, flags, encryption type, kvno, and raw ticket bytes.
 
@@ -146,7 +146,7 @@ The DPAPI signature `48 89 4F 08 48 89 78 08` appears multiple times in `lsasrv.
 
 ### Credential Manager walk
 
-CredMan entries are located via a pointer at session+0x168, which leads to a `KIWI_CREDMAN_SET_LIST_ENTRY` structure. The list is walked with a 255-entry safety limit. Usernames and server names are read from fixed offsets within each entry; passwords are decrypted using the same LSA key material as other packages.
+CredMan entries are located via a pointer at a session-relative offset defined in the template (`session_credman_ptr_offset`, 0x168 on 24H2/25H2), which leads to a `KIWI_CREDMAN_SET_LIST_ENTRY` structure. The list is walked with a 255-entry safety limit. Usernames and server names are read from fixed offsets within each entry; passwords are decrypted using the same LSA key material as other packages.
 
 ---
 
@@ -316,7 +316,8 @@ sid                S-1-5-21-...
 KvcForensic.json    -- required configuration: all signatures and offsets for every build
 core/               -- MemoryReader (mmap), VirtualMemory (VA->RVA), utilities
 minidump/           -- MinidumpParser (no DbgHelp), stream/module/memory64 parsing
-lsa/                -- LogonSessionWalker, TemplateRegistry (JSON loader), LsaStructures
+lsa/                -- LogonSessionWalker, MsvWalker, WdigestWalker, KerberosWalker, DpapiWalker
+                       LsaReaderUtils, TemplateRegistry (JSON loader), LsaStructures
 security/           -- LsaSecretsExtractor, MSV/WDigest/Kerberos/DPAPI/CredMan packages
 analysis/           -- SafeAnalysisEngine, report builders (text + JSON)
 KvcForensicMain     -- entry point, CLI parser, dual-head dispatch

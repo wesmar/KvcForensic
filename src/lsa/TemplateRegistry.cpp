@@ -459,6 +459,8 @@ bool ParseMsvTemplate(JsonCursor& c, MsvTemplateSpec& spec) {
             if (!c.ParseSize(spec.session_sid_ptr_offset)) return false;
         } else if (key == "session_credentials_ptr_offset") {
             if (!c.ParseSize(spec.session_credentials_ptr_offset)) return false;
+        } else if (key == "session_credman_ptr_offset") {
+            if (!c.ParseSize(spec.session_credman_ptr_offset)) return false;
         } else if (key == "parser_support") {
             if (!c.ParseBool(spec.parser_support)) return false;
         } else if (!c.SkipValue()) {

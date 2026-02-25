@@ -17,5 +17,9 @@ inline bool ContainsInsensitive(const std::wstring& haystack, const std::wstring
     return ToLower(haystack).find(ToLower(needle)) != std::wstring::npos;
 }
 
+inline bool ContainsInsensitive(const std::wstring& haystack, const wchar_t* needle) {
+    return ToLower(haystack).find(ToLower(needle)) != std::wstring::npos;
+}
+
 } // namespace KvcForensic::core
 

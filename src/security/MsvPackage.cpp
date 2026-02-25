@@ -12,10 +12,8 @@ std::wstring MsvPackage::Name() const {
 }
 
 void MsvPackage::SetContext(
-    const minidump::MinidumpMetadata* metadata,
-    const BuildLayout* layout) {
+    const minidump::MinidumpMetadata* metadata) {
     metadata_ = metadata;
-    layout_ = layout;
 }
 
 void MsvPackage::Reset() {
@@ -33,14 +31,6 @@ void MsvPackage::Analyze(const std::span<const std::byte> data) {
                 report_.module_present = true;
                 break;
             }
-        }
-    }
-
-    if (layout_ != nullptr) {
-        if (layout_->msv_list_offset == 0) {
-            report_.notes.push_back(L"msv_list_offset is not configured (dummy layout).");
-        } else {
-            report_.notes.push_back(L"msv_list_offset configured.");
         }
     }
 

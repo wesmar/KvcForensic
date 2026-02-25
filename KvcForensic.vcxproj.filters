@@ -37,6 +37,9 @@
     <Filter Include="headers\security">
       <UniqueIdentifier>{AB2CFB70-4AE7-4BDB-BD7E-84E87AFC6B65}</UniqueIdentifier>
     </Filter>
+    <Filter Include="resources">
+      <UniqueIdentifier>{F3A1B2C4-7D8E-4F5A-9B6C-1D2E3F4A5B6C}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 
   <ItemGroup>
@@ -58,6 +61,21 @@
     <ClCompile Include="src\lsa\LogonSessionWalker.cpp">
       <Filter>source\lsa</Filter>
     </ClCompile>
+    <ClCompile Include="src\lsa\LsaReaderUtils.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lsa\MsvWalker.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lsa\WdigestWalker.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lsa\KerberosWalker.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lsa\DpapiWalker.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
     <ClCompile Include="src\lsa\TemplateRegistry.cpp">
       <Filter>source\lsa</Filter>
     </ClCompile>
@@ -70,14 +88,8 @@
     <ClCompile Include="src\KvcForensicWindow.cpp">
       <Filter>source</Filter>
     </ClCompile>
-    <ClCompile Include="src\LsaTemplateSelector.cpp">
-      <Filter>source</Filter>
-    </ClCompile>
     <ClCompile Include="src\minidump\MinidumpParser.cpp">
       <Filter>source\minidump</Filter>
-    </ClCompile>
-    <ClCompile Include="src\security\BuildLayout.cpp">
-      <Filter>source\security</Filter>
     </ClCompile>
     <ClCompile Include="src\security\KerberosPackage.cpp">
       <Filter>source\security</Filter>
@@ -151,6 +163,21 @@
     <ClInclude Include="src\lsa\LogonSessionWalker.h">
       <Filter>headers\lsa</Filter>
     </ClInclude>
+    <ClInclude Include="src\lsa\LsaReaderUtils.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lsa\MsvWalker.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lsa\WdigestWalker.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lsa\KerberosWalker.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lsa\DpapiWalker.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
     <ClInclude Include="src\lsa\TemplateRegistry.h">
       <Filter>headers\lsa</Filter>
     </ClInclude>
@@ -163,17 +190,11 @@
     <ClInclude Include="src\KvcForensicWindow.h">
       <Filter>headers</Filter>
     </ClInclude>
-    <ClInclude Include="src\LsaTemplateSelector.h">
-      <Filter>headers</Filter>
-    </ClInclude>
     <ClInclude Include="src\minidump\DbgHelpTypes.h">
       <Filter>headers\minidump</Filter>
     </ClInclude>
     <ClInclude Include="src\minidump\MinidumpParser.h">
       <Filter>headers\minidump</Filter>
-    </ClInclude>
-    <ClInclude Include="src\security\BuildLayout.h">
-      <Filter>headers\security</Filter>
     </ClInclude>
     <ClInclude Include="src\security\ISecurityPackage.h">
       <Filter>headers\security</Filter>
@@ -211,5 +232,13 @@
     <ClInclude Include="src\WindowsBuildInfo.h">
       <Filter>headers</Filter>
     </ClInclude>
+    <ClInclude Include="resources\Resource.h">
+      <Filter>resources</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\KvcForensic.rc">
+      <Filter>resources</Filter>
+    </ResourceCompile>
   </ItemGroup>
 </Project>
