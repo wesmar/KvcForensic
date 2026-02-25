@@ -61,19 +61,6 @@ void AES_CFB128_Decrypt(
 
 } // namespace
 
-const LsaKeyPattern& LsaSecretsExtractor::GetKeyPattern() {
-    // Windows 11 24H2+ (build >= 26100) - LSA_x64_9 template from pypykatz
-    static const LsaKeyPattern pattern = {
-        // Signature: 16 bytes (not 13!)
-        {0x83, 0x64, 0x24, 0x30, 0x00, 0x48, 0x8d, 0x45, 0xe0, 0x44, 0x8b, 0x4d, 0xd8, 0x48, 0x8d, 0x15},
-        71,   // offset_to_IV_ptr (not 63)
-        16,   // offset_to_AES_key_ptr (not 25)
-        -89,  // offset_to_DES_key_ptr
-        16    // IV_length
-    };
-    return pattern;
-}
-
 LsaSecretsExtractor::LsaSecretsExtractor(
     const core::VirtualMemory& vmem,
     const minidump::MinidumpMetadata& metadata)
@@ -93,7 +80,9 @@ const minidump::ModuleInfo* LsaSecretsExtractor::FindModule(const std::wstring& 
 }
 
 std::uint64_t LsaSecretsExtractor::FindSignature() {
-    const auto& pattern = GetKeyPattern();
+    if (template_ == nullptr || template_->signature.empty()) {
+        return 0;
+    }
     
     const minidump::ModuleInfo* lsasrv = FindModule(L"lsasrv.dll");
     if (!lsasrv) return 0;
@@ -109,8 +98,8 @@ std::uint64_t LsaSecretsExtractor::FindSignature() {
         if (!vmem_.ReadBytes(start, chunk.size(), chunk)) continue;
         
         // Search for signature
-        for (std::size_t i = 0; i <= chunk.size() - pattern.signature.size(); ++i) {
-            if (std::memcmp(chunk.data() + i, pattern.signature.data(), pattern.signature.size()) == 0) {
+        for (std::size_t i = 0; i <= chunk.size() - template_->signature.size(); ++i) {
+            if (std::memcmp(chunk.data() + i, template_->signature.data(), template_->signature.size()) == 0) {
                 return start + i;
             }
         }
@@ -132,10 +121,8 @@ std::uint64_t LsaSecretsExtractor::GetPtr(std::uint64_t pos) {
 }
 
 bool LsaSecretsExtractor::ExtractAesKey(std::uint64_t sig_pos) {
-    const auto& pattern = GetKeyPattern();
-    
     // Step 1: Get pointer to AES key structure (address of global variable g_pAesKey)
-    std::uint64_t ptr_key_handle = GetPtrWithOffset(sig_pos + pattern.offset_to_AES_key_ptr);
+    std::uint64_t ptr_key_handle = GetPtrWithOffset(sig_pos + template_->offset_to_aes_key_ptr);
     if (ptr_key_handle == 0) return false;
     
     // Step 2: Dereference to get the VALUE of g_pAesKey (address of KIWI_BCRYPT_HANDLE_KEY)
@@ -143,90 +130,93 @@ bool LsaSecretsExtractor::ExtractAesKey(std::uint64_t sig_pos) {
     ptr_key_handle = GetPtr(ptr_key_handle);
     if (ptr_key_handle == 0) return false;
     
-    // Step 3: Read KIWI_BCRYPT_HANDLE_KEY structure
-    // Layout: size (4), tag (4), hAlgorithm (8), ptr_key (8)
-    std::uint32_t handle_size = 0;
-    std::uint32_t handle_tag = 0;
-    std::uint64_t h_algorithm = 0;
+    // Step 3: Read KIWI_BCRYPT_HANDLE_KEY structure.
     std::uint64_t ptr_key = 0;
     
-    if (!vmem_.ReadStruct(ptr_key_handle, &handle_size)) return false;
-    if (!vmem_.ReadStruct(ptr_key_handle + 4, &handle_tag)) return false;
-    if (!vmem_.ReadStruct(ptr_key_handle + 8, &h_algorithm)) return false;
-    if (!vmem_.ReadStruct(ptr_key_handle + 16, &ptr_key)) return false;
+    if (!vmem_.ReadStruct(ptr_key_handle + template_->handle_ptr_key_offset, &ptr_key)) return false;
     
     if (ptr_key == 0) return false;
     
-    // Step 4: ptr_key points to KIWI_BCRYPT_KEY81 structure
-    // Layout: size (4), tag (4), ..., cbSecret (4 at offset 56), data[] (at offset 60)
+    // Step 4: ptr_key points to KIWI_BCRYPT_KEY* structure.
     std::uint32_t key_size = 0;
     std::uint32_t key_tag = 0;
     std::uint32_t cb_secret = 0;
     
     if (!vmem_.ReadStruct(ptr_key, &key_size)) return false;
     if (!vmem_.ReadStruct(ptr_key + 4, &key_tag)) return false;
-    if (!vmem_.ReadStruct(ptr_key + 56, &cb_secret)) return false;
+    if (!vmem_.ReadStruct(ptr_key + template_->key_cb_secret_offset, &cb_secret)) return false;
     
     if (cb_secret == 0 || cb_secret > 32) return false;
     
-    // Step 5: Read key data from offset 60
+    // Step 5: Read key material bytes.
     aes_key_.resize(cb_secret);
-    if (!vmem_.ReadBytes(ptr_key + 60, cb_secret, aes_key_)) return false;
+    if (!vmem_.ReadBytes(ptr_key + template_->key_data_offset, cb_secret, aes_key_)) return false;
     
     return true;
 }
 
 bool LsaSecretsExtractor::ExtractDesKey(std::uint64_t sig_pos) {
-    const auto& pattern = GetKeyPattern();
-
     // Same dereference chain as AES key extraction
-    std::uint64_t ptr_key_handle = GetPtrWithOffset(sig_pos + pattern.offset_to_DES_key_ptr);
+    std::uint64_t ptr_key_handle = GetPtrWithOffset(sig_pos + template_->offset_to_des_key_ptr);
     if (ptr_key_handle == 0) return false;
 
     ptr_key_handle = GetPtr(ptr_key_handle);
     if (ptr_key_handle == 0) return false;
 
-    // KIWI_BCRYPT_HANDLE_KEY: size(4) + tag(4) + hAlgorithm(8) + ptr_key(8)
     std::uint64_t ptr_key = 0;
-    if (!vmem_.ReadStruct(ptr_key_handle + 16, &ptr_key)) return false;
+    if (!vmem_.ReadStruct(ptr_key_handle + template_->handle_ptr_key_offset, &ptr_key)) return false;
     if (ptr_key == 0) return false;
 
-    // KIWI_BCRYPT_KEY81: cbSecret at offset 56, data at offset 60
     std::uint32_t cb_secret = 0;
-    if (!vmem_.ReadStruct(ptr_key + 56, &cb_secret)) return false;
+    if (!vmem_.ReadStruct(ptr_key + template_->key_cb_secret_offset, &cb_secret)) return false;
     if (cb_secret == 0 || cb_secret > 32) return false;
 
     des_key_.resize(cb_secret);
-    if (!vmem_.ReadBytes(ptr_key + 60, cb_secret, des_key_)) return false;
+    if (!vmem_.ReadBytes(ptr_key + template_->key_data_offset, cb_secret, des_key_)) return false;
 
     return true;
 }
 
 bool LsaSecretsExtractor::ExtractIv(std::uint64_t sig_pos) {
-    const auto& pattern = GetKeyPattern();
-    
     // Get pointer to IV
-    std::uint64_t ptr_iv = GetPtrWithOffset(sig_pos + pattern.offset_to_IV_ptr);
+    std::uint64_t ptr_iv = GetPtrWithOffset(sig_pos + template_->offset_to_iv_ptr);
     if (ptr_iv == 0) return false;
     
     // Read IV (16 bytes)
-    iv_.resize(pattern.IV_length);
-    if (!vmem_.ReadBytes(ptr_iv, pattern.IV_length, iv_)) return false;
+    iv_.resize(template_->iv_length);
+    if (!vmem_.ReadBytes(ptr_iv, template_->iv_length, iv_)) return false;
     
     return true;
 }
 
-bool LsaSecretsExtractor::Initialize() {
+bool LsaSecretsExtractor::Initialize(const std::uint32_t build_number) {
     if (initialized_) return true;
+    last_error_.clear();
+
+    template_ = lsa::templates::SelectLsaSecretsTemplateX64(build_number);
+    if (template_ == nullptr || template_->signature.empty()) {
+        last_error_ = L"No LSA secrets template for build " + std::to_wstring(build_number) + L".";
+        return false;
+    }
     
     std::uint64_t sig_pos = FindSignature();
-    if (sig_pos == 0) return false;
+    if (sig_pos == 0) {
+        last_error_ = L"LSA secrets signature not found in lsasrv.dll memory ranges.";
+        return false;
+    }
     
-    if (!ExtractIv(sig_pos)) return false;
-    if (!ExtractAesKey(sig_pos)) return false;
+    if (!ExtractIv(sig_pos)) {
+        last_error_ = L"Failed to extract LSA IV.";
+        return false;
+    }
+    if (!ExtractAesKey(sig_pos)) {
+        last_error_ = L"Failed to extract LSA AES key.";
+        return false;
+    }
     ExtractDesKey(sig_pos); // Optional - some dumps may not have DES key
 
     initialized_ = true;
+    last_error_.clear();
     return true;
 }
 

@@ -91,7 +91,12 @@ SafeAnalysisReport SafeAnalysisEngine::AnalyzeFile(
             if (walker.GetSecretsExtractor() && walker.GetSecretsExtractor()->IsInitialized()) {
                 report.decryption_active = true;
                 report.aes_key_bits = walker.GetSecretsExtractor()->GetAesKey().size() * 8;
+                report.decryption_note = L"LSA secrets initialized.";
+            } else if (walker.GetSecretsExtractor()) {
+                report.decryption_note = walker.GetSecretsExtractor()->GetLastError();
             }
+        } else if (walker.GetSecretsExtractor()) {
+            report.decryption_note = walker.GetSecretsExtractor()->GetLastError();
         }
     }
 

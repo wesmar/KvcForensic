@@ -18,6 +18,7 @@ struct SafeAnalysisReport {
     std::vector<lsa::LogonSession> sessions;
     bool decryption_active = false;
     std::size_t aes_key_bits = 0;
+    std::wstring decryption_note;
 };
 
 class SafeAnalysisEngine {

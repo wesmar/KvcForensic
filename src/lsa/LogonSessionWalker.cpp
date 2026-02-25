@@ -16,6 +16,9 @@ namespace KvcForensic::lsa {
 
 namespace {
 
+constexpr std::uint32_t kMinSessionCount = 2;
+constexpr std::uint32_t kMaxSessionCount = 16;
+
 std::string ComputeSha1(std::span<const std::byte> data) {
     BCRYPT_ALG_HANDLE hAlg = NULL;
     BCRYPT_HASH_HANDLE hHash = NULL;
@@ -140,7 +143,7 @@ LogonSessionWalker::LogonSessionWalker(const core::VirtualMemory& vmem, const mi
 bool LogonSessionWalker::Initialize(std::uint32_t build_number) {
     // Initialize LSA secrets extractor (AES key for credential decryption)
     if (secrets_extractor_) {
-        secrets_extractor_->Initialize();
+        secrets_extractor_->Initialize(build_number);
     }
     
     msv_template_ = templates::SelectMsvTemplateX64(build_number);
@@ -239,9 +242,9 @@ std::uint64_t LogonSessionWalker::FindMsvLogonList() {
         }
     }
     
-    // Fallback: ensure we have at least session_count_ = 2 for modern Windows
-    // Some minidumps may have session_count = 1 but actually have 2 lists
-    if (session_count_ < 2) session_count_ = 2;
+    // Clamp list count to a defensive range for malformed dumps.
+    if (session_count_ < kMinSessionCount) session_count_ = kMinSessionCount;
+    if (session_count_ > kMaxSessionCount) session_count_ = kMaxSessionCount;
 
     std::uint64_t target_list = 0;
     if (!vmem_.ReadStruct(ptr_entry_loc, &target_list)) return 0;
@@ -511,22 +514,20 @@ void LogonSessionWalker::WalkPrimaryCredentials(
 
         // Read KIWI_MSV1_0_PRIMARY_CREDENTIAL_ENC structure
         std::uint64_t flink = 0;
-        std::uint16_t primary_len = 0;
-        std::uint16_t primary_max_len = 0;
-        std::uint64_t primary_buffer = 0;
         std::uint16_t enc_len = 0;
         std::uint16_t enc_max_len = 0;
         std::uint64_t enc_buffer = 0;
 
         if (!vmem_.ReadStruct(current, &flink)) break;
-        if (!vmem_.ReadStruct(current + 8, &primary_len)) break;
-        if (!vmem_.ReadStruct(current + 10, &primary_max_len)) break;
-        if (!vmem_.ReadStruct(current + 12, &primary_buffer)) break;
 
         // LSA_UNICODE_STRING at offset 24
         if (!vmem_.ReadStruct(current + 24, &enc_len)) break;
         if (!vmem_.ReadStruct(current + 26, &enc_max_len)) break;
         if (!vmem_.ReadStruct(current + 32, &enc_buffer)) break;
+        if (enc_max_len != 0 && enc_len > enc_max_len) {
+            current = flink;
+            continue;
+        }
 
         // Read encrypted credentials data (x64 addresses are above 0xFFFFFFFF)
         if (enc_len > 0 && enc_buffer != 0) {
@@ -888,14 +889,10 @@ void LogonSessionWalker::WalkAvlNode(
                 return false;
             };
 
-            // KIWI_KERBEROS_LOGON_SESSION_24H2:
-            // LUID at +64, credentials.UserName at +120, credentials.Domaine at +136
             std::uint64_t entry_luid = 0;
-            vmem_.ReadStruct(session_ptr + 64, &entry_luid);
+            vmem_.ReadStruct(session_ptr + kerberos_template_->session_luid_offset, &entry_luid);
             if (!luid_exists(entry_luid)) {
-                // Fallback offsets observed on some builds/dumps.
-                const std::uint64_t offsets[] = { 56, 48, 72, 40, 32 };
-                for (const auto off : offsets) {
+                for (const auto off : kerberos_template_->session_luid_fallback_offsets) {
                     std::uint64_t alt_luid = 0;
                     if (vmem_.ReadStruct(session_ptr + off, &alt_luid) && luid_exists(alt_luid)) {
                         entry_luid = alt_luid;
@@ -904,15 +901,15 @@ void LogonSessionWalker::WalkAvlNode(
                 }
             }
 
-            std::wstring username   = ReadUnicodeString(session_ptr + 120);
-            std::wstring domainname = ReadUnicodeString(session_ptr + 136);
+            std::wstring username = ReadUnicodeString(session_ptr + kerberos_template_->session_username_offset);
+            std::wstring domainname = ReadUnicodeString(session_ptr + kerberos_template_->session_domain_offset);
 
-            // Password LSA_UNICODE_STRING at +168 (credentials.Password in KIWI_KERBEROS_10_PRIMARY_CREDENTIAL_1607)
             std::uint16_t pwd_len = 0, pwd_max_len = 0;
             std::uint64_t pwd_buffer = 0;
-            vmem_.ReadStruct(session_ptr + 168, &pwd_len);
-            vmem_.ReadStruct(session_ptr + 170, &pwd_max_len);
-            vmem_.ReadStruct(session_ptr + 176, &pwd_buffer);
+            const auto pwd_off = kerberos_template_->session_password_ustr_offset;
+            vmem_.ReadStruct(session_ptr + pwd_off, &pwd_len);
+            vmem_.ReadStruct(session_ptr + pwd_off + 2, &pwd_max_len);
+            vmem_.ReadStruct(session_ptr + pwd_off + 8, &pwd_buffer);
 
             std::wstring password;
             std::wstring password_hex;
@@ -958,16 +955,11 @@ void LogonSessionWalker::WalkAvlNode(
 }
 
 void LogonSessionWalker::WalkKerberosTickets(std::uint64_t session_ptr, security::KerberosCredential& cred) {
-    // KIWI_KERBEROS_LOGON_SESSION_24H2 (x64, Windows Server 2025 build 26100):
-    //   Tickets_1.Flink@+280, Tickets_2.Flink@+304, Tickets_3.Flink@+328
-    // KIWI_KERBEROS_INTERNAL_TICKET_11 (x64, empirically verified):
-    //   +32  ServiceName (PKERB_EXTERNAL_NAME), +40 TargetName, +144 ClientName
-    //   +160 TicketFlags (big-endian UINT32),   +180 KeyType (ULONG)
-    //   +308 TicketEncType (ULONG), +312 TicketKvno (ULONG)
-    //   +320 Ticket.Length (ULONG), +328 Ticket.Value (PVOID)
-    const std::size_t ticket_offsets[] = { 280, 304, 328 };
+    if (kerberos_template_ == nullptr || kerberos_template_->ticket_list_offsets.empty()) {
+        return;
+    }
 
-    for (std::size_t ticket_offset : ticket_offsets) {
+    for (const std::size_t ticket_offset : kerberos_template_->ticket_list_offsets) {
         std::uint64_t flink = 0;
         if (!vmem_.ReadStruct(session_ptr + ticket_offset, &flink)) continue;
 
@@ -991,24 +983,23 @@ void LogonSessionWalker::WalkKerberosTickets(std::uint64_t session_ptr, security
             std::uint32_t ticket_len       = 0;
             std::uint64_t ticket_buffer    = 0;
 
-            vmem_.ReadStruct(current + 32,  &service_name_ptr);
-            vmem_.ReadStruct(current + 40,  &target_name_ptr);
-            vmem_.ReadStruct(current + 144, &client_name_ptr);
-            vmem_.ReadStruct(current + 160, &ticket_flags);
-            vmem_.ReadStruct(current + 180, &key_type);
-            vmem_.ReadStruct(current + 308, &ticket_enc_type);
-            vmem_.ReadStruct(current + 312, &ticket_kvno);
-            vmem_.ReadStruct(current + 320, &ticket_len);
-            vmem_.ReadStruct(current + 328, &ticket_buffer);
+            vmem_.ReadStruct(current + kerberos_template_->ticket_service_name_offset, &service_name_ptr);
+            vmem_.ReadStruct(current + kerberos_template_->ticket_target_name_offset, &target_name_ptr);
+            vmem_.ReadStruct(current + kerberos_template_->ticket_client_name_offset, &client_name_ptr);
+            vmem_.ReadStruct(current + kerberos_template_->ticket_flags_offset, &ticket_flags);
+            vmem_.ReadStruct(current + kerberos_template_->ticket_key_type_offset, &key_type);
+            vmem_.ReadStruct(current + kerberos_template_->ticket_enc_type_offset, &ticket_enc_type);
+            vmem_.ReadStruct(current + kerberos_template_->ticket_kvno_offset, &ticket_kvno);
+            vmem_.ReadStruct(current + kerberos_template_->ticket_buffer_len_offset, &ticket_len);
+            vmem_.ReadStruct(current + kerberos_template_->ticket_buffer_ptr_offset, &ticket_buffer);
 
-            // PKERB_EXTERNAL_NAME points to: NameType(2)+NameCount(2)+pad(4)+Names[0](LSA_UNICODE_STRING)
-            // The first LSA_UNICODE_STRING starts at ptr+8.
             std::wstring service_name;
             std::wstring target_name;
             std::wstring client_name;
-            if (service_name_ptr != 0) service_name = ReadUnicodeString(service_name_ptr + 8);
-            if (target_name_ptr  != 0) target_name  = ReadUnicodeString(target_name_ptr  + 8);
-            if (client_name_ptr  != 0) client_name  = ReadUnicodeString(client_name_ptr  + 8);
+            const auto ext_name_off = kerberos_template_->external_name_first_string_offset;
+            if (service_name_ptr != 0) service_name = ReadUnicodeString(service_name_ptr + ext_name_off);
+            if (target_name_ptr  != 0) target_name = ReadUnicodeString(target_name_ptr + ext_name_off);
+            if (client_name_ptr  != 0) client_name = ReadUnicodeString(client_name_ptr + ext_name_off);
 
             if (ticket_len > 0 && ticket_len < 0x10000 && ticket_buffer != 0) {
                 std::vector<std::byte> ticket_data(ticket_len);
@@ -1075,8 +1066,9 @@ void LogonSessionWalker::WalkDpapiList(std::vector<LogonSession>& sessions) {
     collect_in_module(L"lsass.exe",     all_candidates);
 
     if (all_candidates.empty()) {
+        constexpr std::size_t kMaxFallbackRangeBytes = 64u * 1024 * 1024; // 64 MB guard
         for (const auto& range : metadata_.memory_ranges) {
-            if (range.size < sig.size()) continue;
+            if (range.size < sig.size() || range.size > kMaxFallbackRangeBytes) continue;
             std::vector<std::byte> chunk(range.size);
             if (!vmem_.ReadBytes(range.start_vva, chunk.size(), chunk)) continue;
             for (std::size_t i = 0; i + sig.size() <= chunk.size(); ++i) {

@@ -116,6 +116,9 @@ void AppendCredentials(std::wstringstream& ss, const SafeAnalysisReport& report)
            << L"   sessions: " << report.sessions.size() << L"\r\n";
     } else {
         ss << L"[!] Decryption key not found\r\n";
+        if (!report.decryption_note.empty()) {
+            ss << L"[!] " << report.decryption_note << L"\r\n";
+        }
     }
     ss << L"\r\n";
 

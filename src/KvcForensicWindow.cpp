@@ -43,6 +43,7 @@ constexpr WORD IDM_FILE_OPEN  = 0x0101;
 constexpr WORD IDM_FILE_EXIT  = 0x0103;
 constexpr WORD IDM_HELP_ABOUT = 0x0201;
 constexpr WORD IDM_VIEW_ADVANCED = 0x0301;
+constexpr WORD IDM_EDIT_COPY     = 0x0401;
 
 // Status bar parts
 constexpr int SB_FILE  = 0;
@@ -363,6 +364,7 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
             if (has_report_) PopulateTree();
             return 0;
         }
+        case IDM_EDIT_COPY:  CopySelectedRows(); return 0;
         case IDM_HELP_ABOUT:
             ::MessageBoxW(hwnd_,
                 L"KvcForensic - LSASS minidump credential extractor\n"
@@ -381,6 +383,15 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
         if (nm->hwndFrom == tree_ && nm->code == TVN_SELCHANGEDW) {
             auto* ntv = reinterpret_cast<NMTREEVIEWW*>(lp);
             ShowNodeDetail(ntv->itemNew.lParam);
+        }
+        if (nm->hwndFrom == detail_ && nm->code == NM_RCLICK) {
+            POINT pt; ::GetCursorPos(&pt);
+            HMENU hCtx = ::CreatePopupMenu();
+            int sel = ListView_GetSelectedCount(detail_);
+            ::AppendMenuW(hCtx, MF_STRING | (sel > 0 ? 0 : MF_GRAYED),
+                IDM_EDIT_COPY, L"Copy\tCtrl+C");
+            ::TrackPopupMenu(hCtx, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, nullptr);
+            ::DestroyMenu(hCtx);
         }
         return 0;
     }
@@ -546,8 +557,9 @@ void KvcForensicWindow::CreateAppMenu() {
     // Accelerator table
     ACCEL acc[] = {
         { FVIRTKEY | FCONTROL, 'O', IDM_FILE_OPEN },
+        { FVIRTKEY | FCONTROL, 'C', IDM_EDIT_COPY },
     };
-    accel_ = ::CreateAcceleratorTableW(acc, 1);
+    accel_ = ::CreateAcceleratorTableW(acc, 2);
 }
 
 void KvcForensicWindow::LayoutControls(int w, int h) {
@@ -1088,5 +1100,49 @@ void KvcForensicWindow::SetStatus(int part, const wchar_t* text) {
         ::SendMessageW(status_bar_, SB_SETTEXTW, (WPARAM)part, reinterpret_cast<LPARAM>(text));
 }
 
+
+// ---------------------------------------------------------------------------
+// Clipboard copy
+// ---------------------------------------------------------------------------
+void KvcForensicWindow::CopySelectedRows() {
+    if (!detail_) return;
+
+    std::wstring text;
+    int count = ListView_GetItemCount(detail_);
+    wchar_t buf[1024];
+
+    for (int i = 0; i < count; ++i) {
+        if (!(ListView_GetItemState(detail_, i, LVIS_SELECTED) & LVIS_SELECTED))
+            continue;
+
+        buf[0] = L'\0';
+        ListView_GetItemText(detail_, i, 0, buf, 1024);
+        text += buf;
+        text += L'\t';
+
+        buf[0] = L'\0';
+        ListView_GetItemText(detail_, i, 1, buf, 1024);
+        text += buf;
+        text += L'\n';
+    }
+
+    if (text.empty()) return;
+
+    size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL hMem = ::GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!hMem) return;
+    void* ptr = ::GlobalLock(hMem);
+    if (!ptr) { ::GlobalFree(hMem); return; }
+    memcpy(ptr, text.c_str(), bytes);
+    ::GlobalUnlock(hMem);
+
+    if (::OpenClipboard(hwnd_)) {
+        ::EmptyClipboard();
+        ::SetClipboardData(CF_UNICODETEXT, hMem);
+        ::CloseClipboard();
+    } else {
+        ::GlobalFree(hMem);
+    }
+}
 
 } // namespace KvcForensic::ui

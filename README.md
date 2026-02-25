@@ -2,12 +2,18 @@
 
 ![KvcForensic](images/KvcForensic.jpg)
 
-Modern Windows LSA credential parser for `lsass.dmp` minidumps.
-Primary targets: **Windows 11 24H2 / 25H2** (builds 26100+) and their Server equivalents (Windows Server 2025). Older build templates are present but are not actively maintained.
+Windows LSA credential parser for `lsass.dmp` minidumps.
+Active support targets: **Windows 11 24H2 / 25H2** (builds 26100+) and **Windows Server 2025**. Template entries for older builds are present in `KvcForensic.json` but credential decryption is not implemented for them.
 
 Built entirely on pure Win32 API. No runtime dependencies beyond the OS and the BCrypt primitive. No DbgHelp, no third-party libraries, no framework.
 
 Binary size is under 300 KB when linked against the system CRT, and under 600 KB with the CRT statically embedded.
+
+---
+
+## Requirements
+
+`KvcForensic.json` must be placed in the same directory as `KvcForensic.exe`. It is loaded at startup before any analysis. The program will not run without it. If the file is missing, malformed, or fails schema validation, a startup error is shown and execution stops.
 
 ---
 
@@ -69,21 +75,24 @@ The Windows BCrypt API exposes CFB only in 8-bit feedback (CFB8) mode. CFB128 is
 
 3DES-CBC uses only the first 8 bytes of the IV.
 
-Key material (AES-128/256, 3DES, IV) is located by scanning `lsasrv.dll` for the `LSA_x64_9` signature (a 16-byte byte pattern specific to Windows 11 24H2+) and following the `KIWI_BCRYPT_HANDLE_KEY` -> `KIWI_BCRYPT_KEY81` pointer chain to the raw key bytes at a fixed structure offset.
+Key material (AES-128/256, 3DES, IV) is located by scanning `lsasrv.dll` for the `LSA_24H2_plus` signature and following the `KIWI_BCRYPT_HANDLE_KEY` -> `KIWI_BCRYPT_KEY81` pointer chain to the raw key bytes at a fixed structure offset.
 
 ### Template system
 
-Each security package version is described by a `*TemplateSpec` structure containing:
+All per-build configuration is stored in `KvcForensic.json`, which is loaded at startup from the executable's directory. The file must contain five top-level arrays: `msv_x64`, `wdigest_x64`, `kerberos_x64`, `dpapi_x64`, and `lsa_secrets_x64`. All five are mandatory. If any array is absent or fails validation, initialization fails and the program stops.
+
+The JSON is parsed by a custom single-pass recursive-descent parser with no floating-point support. No third-party JSON library is used. The size of the file is capped at 4 MB before parsing begins.
+
+Each template entry defines:
 
 - Build range (`min_build` / `max_build`)
 - Byte signature to locate the data structure within the loaded DLL image in memory
 - Offsets relative to the signature match
+- `parser_support` flag (MSV only): whether full session field parsing is implemented for that build range
 
-Templates are selected at runtime based on the build number extracted from `SystemInfoStream`. The MSV package covers 10 templates spanning Windows 7 (build 7600) through Windows 11 25H2 (build 26200+). WDigest has 2 templates, Kerberos 1, DPAPI 1.
+Templates are selected at runtime by matching the build number from `SystemInfoStream` against each entry's range. The MSV array covers 10 entries spanning Windows 7 (build 7600) through Windows 11 25H2 (build 26200+). WDigest has 2 entries, Kerberos 1, DPAPI 1, LSA secrets 1.
 
-For builds where `parser_support = true` (currently 24H2 and 25H2), session field offsets are taken directly from the template. Older builds fall back to `DetectSessionFieldLayout()`, which scores six candidate offset sets against actual memory content — checking LUID validity, string readability, and SID prefix — and selects the highest-scoring set.
-
-The template definitions are compiled in as static C++ arrays. A planned future version will load templates from an external JSON file, allowing build coverage to be extended without recompilation. The template resolution logic and dereference chains will remain unchanged.
+For builds where `parser_support = true` (currently 24H2 and 25H2), session field offsets are taken directly from the template. Older builds fall back to `DetectSessionFieldLayout()`, which scores six candidate offset sets against actual memory content -- checking LUID validity, string readability, and SID prefix -- and selects the highest-scoring set. LSA key material decryption is only available for builds covered by the `lsa_secrets_x64` template (26100+), so credential plaintext and NT hashes cannot be recovered from older dumps regardless of template presence.
 
 ### MSV credential walk
 
@@ -133,7 +142,7 @@ On some builds, WDigest maintains multiple adjacent list heads. KvcForensic prob
 
 ### DPAPI master key walk
 
-The DPAPI signature `48 89 4F 08 48 89 78 08` appears multiple times in `lsasrv.dll`. KvcForensic collects all occurrences in `lsasrv.dll`, `dpapisrv.dll`, and `lsass.exe` (with a full-memory fallback if no module match is found), resolves each RIP-relative pointer to a `KIWI_MASTERKEY_CACHE_ENTRY` sentinel, and walks every distinct list. A global `visited_entries` set prevents double-processing of nodes reachable from multiple sentinels. Decrypted master keys are SHA1-hashed via BCrypt and included in the output.
+The DPAPI signature `48 89 4F 08 48 89 78 08` appears multiple times in `lsasrv.dll`. KvcForensic collects all occurrences in `lsasrv.dll`, `dpapisrv.dll`, and `lsass.exe` (with a full-memory fallback for ranges up to 64 MB if no module match is found), resolves each RIP-relative pointer to a `KIWI_MASTERKEY_CACHE_ENTRY` sentinel, and walks every distinct list. A global `visited_entries` set prevents double-processing of nodes reachable from multiple sentinels. Decrypted master keys are SHA1-hashed via BCrypt and included in the output.
 
 ### Credential Manager walk
 
@@ -147,7 +156,9 @@ After studying the source of both mimikatz and pypykatz, several design decision
 
 **No DbgHelp dependency.** mimikatz relies on `MiniDumpReadDumpStream` and related DbgHelp APIs for minidump navigation. KvcForensic parses the MDMP format directly using only the public stream type definitions, eliminating the DbgHelp.dll dependency entirely.
 
-**CFB128 implemented manually.** BCrypt on Windows exposes CFB only in 8-bit feedback mode. Both mimikatz and pypykatz work around this via a manual CFB128 loop. KvcForensic uses the same approach — ECB encrypt the counter, XOR with ciphertext, advance counter with ciphertext — but implemented over BCrypt's ECB primitive rather than a software AES implementation, keeping all cryptographic operations within the OS-provided boundary.
+**External JSON configuration.** All offsets and signatures are defined in `KvcForensic.json` rather than compiled into the binary. Adding coverage for a new Windows build requires editing the JSON file only, with no recompilation.
+
+**CFB128 implemented manually.** BCrypt on Windows exposes CFB only in 8-bit feedback mode. Both mimikatz and pypykatz work around this via a manual CFB128 loop. KvcForensic uses the same approach -- ECB encrypt the counter, XOR with ciphertext, advance counter with ciphertext -- but implemented over BCrypt's ECB primitive rather than a software AES implementation, keeping all cryptographic operations within the OS-provided boundary.
 
 **Multiple DPAPI sentinel collection.** mimikatz and pypykatz typically follow the first matching signature occurrence to locate the DPAPI master key list. KvcForensic collects all occurrences across all relevant modules and walks every distinct list, using a global visited set to deduplicate. This accounts for cases where multiple code locations reference different list roots.
 
@@ -170,19 +181,19 @@ KvcForensic.exe --help
 
 **Options:**
 
-`--input <file>` — path to the dump file (default: `lsass.dmp` in the current directory)
+`--input <file>` -- path to the dump file (default: `lsass.dmp` in the current directory)
 
-`--output <file>` — path for the text output (default: `output_KvcForensic.txt`). When `--format both` is used, the JSON output is written alongside with a `.json` extension derived from the text path.
+`--output <file>` -- path for the text output (default: `output_KvcForensic.txt`). When `--format both` is used, the JSON output is written alongside with a `.json` extension derived from the text path.
 
-`--format txt|json|both` — output format (default: `txt`)
+`--format txt|json|both` -- output format (default: `txt`)
 
-`--compare <ref>` — compare extraction results against a previously generated text report. The diff is appended to the main output and also written to a `.compare.txt` file derived from the output path.
+`--compare <ref>` -- compare extraction results against a previously generated text report. The diff is appended to the main output and also written to a `.compare.txt` file derived from the output path.
 
-`--force` — override the build number embedded in the dump with the build number of the machine running KvcForensic. Useful when the dump was taken under a mismatched build or when the SystemInfoStream is unreliable.
+`--force` -- override the build number embedded in the dump with the build number of the machine running KvcForensic. Useful when the dump was taken under a mismatched build or when the SystemInfoStream is unreliable.
 
-`--full` — include full metadata in the text report: dump header, stream list, module list, and security package presence checks. Without this flag, output contains only the credential header and logon sessions.
+`--full` -- include full metadata in the text report: dump header, stream list, module list, and security package presence checks. Without this flag, output contains only the credential header and logon sessions.
 
-`--help` / `-h` / `/?` — print usage and exit.
+`--help` / `-h` / `/?` -- print usage and exit.
 
 **Examples:**
 
@@ -226,6 +237,8 @@ This does not modify any kernel structures. It operates entirely in user mode an
 
 Single binary with a native WinAPI window. Supports Mica backdrop (Windows 11 22H2+) with automatic light/dark mode following the system theme. No WinUI 3, no Qt, no MFC.
 
+The detail panel supports row selection with Ctrl+click and Shift+click. Selected rows can be copied to the clipboard with Ctrl+C or via the right-click context menu.
+
 ---
 
 ## Build requirements
@@ -239,24 +252,19 @@ Single binary with a native WinAPI window. Supports Mica backdrop (Windows 11 22
 
 ## Supported builds
 
-| Windows version         | Build range   | MSV template             |
+Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) requires both a session template with `parser_support = true` and an LSA secrets key template. Both conditions are met only for builds 26100 and above.
+
+| Windows version         | Build range   | Credential extraction    |
 |-------------------------|---------------|--------------------------|
-| Windows 11 25H2         | 26200+        | MSV_x64_11_25H2          |
-| Windows Server 2025     | 26100+        | MSV_x64_11_24H2          |
-| Windows 11 24H2         | 26100-26199   | MSV_x64_11_24H2          |
-| Windows 11 23H2         | 22631         | MSV_x64_11_2023          |
-| Windows 11 22H2         | 22621         | MSV_x64_11_2023          |
-| Windows 11 21H2         | 20348-22099   | MSV_x64_11_2022          |
-| Windows 10 1803-22H2    | 17134-20347   | MSV_x64_1803_22H2        |
-| Windows 10 1703         | 15063-17133   | MSV_x64_1703             |
-| Windows 10 1507-1607    | 10240-15062   | MSV_x64_10_1507_1607     |
-| Windows 8.1             | 9600-10239    | MSV_x64_63               |
-| Windows 8               | 9200-9599     | MSV_x64_62               |
-| Windows 7               | 7600-9199     | MSV_x64_61               |
+| Windows 11 25H2         | 26200+        | Full                     |
+| Windows 11 24H2         | 26100-26199   | Full                     |
+| Windows Server 2025     | 26100+        | Full                     |
+| Windows 11 23H2 / 22H2  | 22621-22631   | Template only, no decryption |
+| Windows 11 21H2 and earlier, Windows 10, 8.x, 7 | below 22621 | Template only, no decryption |
 
-Primary development and validation target is Windows 11 25H2 (build 26200). Older templates are present but not actively tested against live system changes.
+Template entries for all builds from Windows 7 (7600) through Windows 11 21H2 are present in `KvcForensic.json` to allow signature location and session list traversal. Credential decryption is unavailable for these builds because the LSA key template does not cover them. Output for unsupported builds will contain session metadata (LUID, username, domain, SID) where the layout detection heuristic succeeds, but all credential fields will be empty.
 
-The LSA key signature (`LSA_x64_9`) and credential structure layouts for builds below 26100 differ from the 24H2/25H2 implementation. The DPAPI template (`Dpapi_x64_win10_plus`) is shared across all builds from Windows 10 1607 (build 14393) onward, consistent with pypykatz's observed template coverage.
+Primary development and validation target is Windows 11 25H2 (build 26200) and Windows 11 24H2 (build 26100).
 
 ---
 
@@ -305,21 +313,22 @@ sid                S-1-5-21-...
 ## Project structure
 
 ```
-core/           -- MemoryReader (mmap), VirtualMemory (VA->RVA), utilities
-minidump/       -- MinidumpParser (no DbgHelp), stream/module/memory64 parsing
-lsa/            -- LogonSessionWalker, TemplateRegistry, LsaStructures
-security/       -- LsaSecretsExtractor, MSV/WDigest/Kerberos/DPAPI/CredMan packages
-analysis/       -- SafeAnalysisEngine, report builders (text + JSON)
-KvcForensicMain   -- entry point, CLI parser, dual-head dispatch
-KvcForensicWindow -- WinAPI GUI, Mica integration
+KvcForensic.json    -- required configuration: all signatures and offsets for every build
+core/               -- MemoryReader (mmap), VirtualMemory (VA->RVA), utilities
+minidump/           -- MinidumpParser (no DbgHelp), stream/module/memory64 parsing
+lsa/                -- LogonSessionWalker, TemplateRegistry (JSON loader), LsaStructures
+security/           -- LsaSecretsExtractor, MSV/WDigest/Kerberos/DPAPI/CredMan packages
+analysis/           -- SafeAnalysisEngine, report builders (text + JSON)
+KvcForensicMain     -- entry point, CLI parser, dual-head dispatch
+KvcForensicWindow   -- WinAPI GUI, Mica integration
 ```
 
 ---
 
 ## Related projects
 
-- [kvc](https://github.com/wesmar/kvc) — DSE bypass and PP/PPL manipulation for lsass dumping on modern Windows with HVCI/VBS. Prerequisite for obtaining the dump on systems with PPL active.
-- [KernelResearchKit](https://github.com/wesmar/KernelResearchKit) — Windows 11 kernel research framework.
+- [kvc](https://github.com/wesmar/kvc) -- DSE bypass and PP/PPL manipulation for lsass dumping on modern Windows with HVCI/VBS. Prerequisite for obtaining the dump on systems with PPL active.
+- [KernelResearchKit](https://github.com/wesmar/KernelResearchKit) -- Windows 11 kernel research framework.
 
 ---
 

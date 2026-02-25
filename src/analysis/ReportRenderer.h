@@ -38,7 +38,15 @@ inline std::wstring EscapeJson(const std::wstring& input) {
         case L'\r': out += L"\\r";  break;
         case L'\n': out += L"\\n";  break;
         case L'\t': out += L"\\t";  break;
-        default:    out.push_back(ch); break;
+        default:
+            if (ch < 0x20) {
+                wchar_t buf[7];
+                swprintf_s(buf, L"\\u%04X", static_cast<unsigned>(ch));
+                out += buf;
+            } else {
+                out.push_back(ch);
+            }
+            break;
         }
     }
     return out;

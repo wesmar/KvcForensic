@@ -147,6 +147,11 @@ std::wstring BuildJsonReport(const SafeAnalysisReport& report) {
 
     // ── 2. META (technical details for admins) ─────────────────────────────
     ss << L"  \"meta\": {\n";
+    ss << L"    \"decryption\": {\n";
+    ss << L"      \"active\": " << (report.decryption_active ? L"true" : L"false") << L",\n";
+    ss << L"      \"aes_key_bits\": " << std::dec << report.aes_key_bits << std::hex << L",\n";
+    ss << L"      \"note\": " << JStr(report.decryption_note) << L"\n";
+    ss << L"    },\n";
     ss << L"    \"input\": {\n";
     ss << L"      \"path\": "  << JStr(report.dump.path) << L",\n";
     ss << L"      \"size\": "  << std::dec << report.dump.file_size << L",\n";

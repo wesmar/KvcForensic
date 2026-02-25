@@ -54,6 +54,7 @@ private:
 
     void ApplyTheme();
     void UpdateTheme();
+    void CopySelectedRows();
 
     // Node LPARAM encoding: high 16 bits = NodeType, low 16 bits = index
     static LPARAM    EncodeNode(NodeType type, int idx = 0);

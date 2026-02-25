@@ -1,3 +1,4 @@
+#include "lsa/TemplateRegistry.h"
 #include "KvcForensicWindow.h"
 #include "WindowsBuildInfo.h"
 #include "analysis/JsonReportBuilder.h"
@@ -287,6 +288,31 @@ int WINAPI wWinMain(
         }
         wprintf(L"[-] Failed to execute command.\n");
         ExitNow(1);
+    }
+
+    std::wstring template_error;
+    wchar_t exePath[MAX_PATH] = {};
+    if (!::GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+        template_error = L"Cannot resolve executable path for template lookup.";
+    } else {
+        std::filesystem::path p(exePath);
+        std::filesystem::path jsonPath = p.parent_path() / "KvcForensic.json";
+        if (!KvcForensic::lsa::templates::InitializeRegistry(jsonPath.wstring())) {
+            template_error = KvcForensic::lsa::templates::GetRegistryInitError();
+            if (template_error.empty()) {
+                template_error = L"Template initialization failed.";
+            }
+        }
+    }
+
+    if (!template_error.empty()) {
+        if (options.batch_mode) {
+            InitializeConsole();
+            wprintf(L"Template initialization error: %s\n", template_error.c_str());
+            ExitNow(5);
+        }
+        ::MessageBoxW(nullptr, template_error.c_str(), L"KvcForensic - Template Error", MB_ICONERROR | MB_OK);
+        return 2;
     }
 
     if (options.batch_mode) {
