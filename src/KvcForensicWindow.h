@@ -51,6 +51,7 @@ private:
     void AddDetailRow(const wchar_t* prop, const wchar_t* value);
     void AddDetailRow(const wchar_t* prop, const std::wstring& value);
     void SetStatus(int part, const wchar_t* text);
+    void SetStatusWarningMode(bool warning);
 
     void ApplyTheme();
     void UpdateTheme();

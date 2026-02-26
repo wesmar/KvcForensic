@@ -96,7 +96,7 @@ Key material (AES-128/256, 3DES, IV) is located by scanning `lsasrv.dll` for the
 
 ### Template system
 
-All per-build configuration is stored in `KvcForensic.json`, which is loaded at startup from the executable's directory. The file must contain five top-level arrays: `msv_x64`, `wdigest_x64`, `kerberos_x64`, `dpapi_x64`, and `lsa_secrets_x64`. All five are mandatory. If any array is absent or fails validation, initialization fails and the program stops.
+All per-build configuration is stored in `KvcForensic.json`, which is loaded at startup from the executable's directory. The file must contain five mandatory top-level arrays: `msv_x64`, `wdigest_x64`, `kerberos_x64`, `dpapi_x64`, and `lsa_secrets_x64`. The `tspkg_x64` array is optional. If any mandatory array is absent or fails validation, initialization fails and the program stops.
 
 The JSON is parsed by a custom single-pass recursive-descent parser with no floating-point support. No third-party JSON library is used. The size of the file is capped at 4 MB before parsing begins.
 
@@ -107,9 +107,11 @@ Each template entry defines:
 - Offsets relative to the signature match
 - `parser_support` flag (MSV only): whether full session field parsing is implemented for that build range
 
-Templates are selected at runtime by matching the build number from `SystemInfoStream` against each entry's range. The MSV array covers 10 entries spanning Windows 7 (build 7600) through Windows 11 25H2 (build 26200+). WDigest has 2 entries, Kerberos 1, DPAPI 1, LSA secrets 1.
+Templates are selected at runtime by matching the build number from `SystemInfoStream` against each entry's range. The MSV array covers entries spanning Windows 7 (build 7600) through Windows 11 25H2 (build 26200+). WDigest has 2 entries, Kerberos 1, DPAPI 1, LSA secrets 1, and TSPKG templates are optional.
 
-For builds where `parser_support = true` (currently 24H2 and 25H2), session field offsets are taken directly from the template. Older builds fall back to `DetectSessionFieldLayout()`, which scores six candidate offset sets against actual memory content -- checking LUID validity, string readability, and SID prefix -- and selects the highest-scoring set. LSA key material decryption is only available for builds covered by the `lsa_secrets_x64` template (26100+), so credential plaintext and NT hashes cannot be recovered from older dumps regardless of template presence.
+For MSV, multiple overlapping template entries are allowed for the same build range. KvcForensic evaluates all matching candidates and selects the best-scoring layout against live dump memory. Even when `parser_support = true`, a heuristic shift/fallback path can be activated when template offsets do not validate well on the analyzed dump. In that case, the GUI shows a red warning status (`Heuristic mode` / `Heuristic fallback used`) to indicate reduced confidence.
+
+LSA key material decryption is only available for builds covered by the `lsa_secrets_x64` template (26100+), so credential plaintext and NT hashes cannot be recovered from older dumps regardless of template presence.
 
 ### MSV credential walk
 
@@ -183,7 +185,7 @@ After studying the source of both mimikatz and pypykatz, several design decision
 
 **Two-format MSV credential layout.** The 24H2/25H2 primary credential structure exists in two distinct field arrangements depending on whether DPAPI protection is active. KvcForensic detects the format from the flag byte at offset 40 and parses each variant accordingly. Neither mimikatz (at the time of writing, targeting the single known layout) nor pypykatz explicitly branch on this flag.
 
-**Scoring-based layout detection for older builds.** For builds without hardcoded offsets, KvcForensic evaluates six candidate session field layouts against actual dump content rather than maintaining a separate per-build offset table. Each candidate is scored by how many sessions yield a valid LUID, readable strings, and a recognizable SID prefix. The highest-scoring layout is used.
+**Scoring-based layout detection and runtime fallback.** KvcForensic evaluates candidate session field layouts against actual dump content rather than relying solely on one static offset set. Candidates are scored by LUID plausibility, string readability, SID prefix validation, and credential-list pointer sanity. The highest-scoring layout is used, and when fallback is required the GUI marks the run as heuristic mode.
 
 ---
 
@@ -260,6 +262,8 @@ This does not modify any kernel structures. It operates entirely in user mode an
 Single binary with a native WinAPI window. Supports Mica backdrop (Windows 11 22H2+) with automatic light/dark mode following the system theme. No WinUI 3, no Qt, no MFC.
 
 The detail panel supports row selection with Ctrl+click and Shift+click. Selected rows can be copied to the clipboard with Ctrl+C or via the right-click context menu.
+
+When the parser must use heuristic layout recovery (template mismatch or runtime fallback), the status bar turns red and displays a short warning. This indicates that extraction succeeded, but confidence is lower than an exact template match.
 
 ---
 
@@ -339,8 +343,8 @@ KvcForensic.json    -- required configuration: all signatures and offsets for ev
 core/               -- MemoryReader (mmap), VirtualMemory (VA->RVA), utilities
 minidump/           -- MinidumpParser (no DbgHelp), stream/module/memory64 parsing
 lsa/                -- LogonSessionWalker, MsvWalker, WdigestWalker, KerberosWalker, DpapiWalker
-                       LsaReaderUtils, TemplateRegistry (JSON loader), LsaStructures
-security/           -- LsaSecretsExtractor, MSV/WDigest/Kerberos/DPAPI/CredMan packages
+                       TspkgWalker, LsaReaderUtils, TemplateRegistry (JSON loader), LsaStructures
+security/           -- LsaSecretsExtractor, MSV/WDigest/TSPKG/Kerberos/DPAPI/CredMan packages
 analysis/           -- SafeAnalysisEngine, report builders (text + JSON)
 KvcForensicMain     -- entry point, CLI parser, dual-head dispatch
 KvcForensicWindow   -- WinAPI GUI, Mica integration

@@ -51,11 +51,19 @@ public:
 
     const std::wstring& GetTemplateName() const {
         static const std::wstring kEmpty;
-        return msv_template_ ? msv_template_->name : kEmpty;
+        return active_msv_template_.name.empty() ? kEmpty : active_msv_template_.name;
     }
 
     std::uint32_t GetTemplateMinBuild() const {
-        return msv_template_ ? msv_template_->min_build : 0;
+        return active_msv_template_.min_build;
+    }
+
+    bool UsedHeuristicLayout() const {
+        return used_heuristic_layout_;
+    }
+
+    bool UsedRuntimeFallback() const {
+        return used_runtime_fallback_;
     }
 
 private:
@@ -95,6 +103,8 @@ private:
     std::uint64_t      logon_list_va_  = 0;
     std::uint32_t      session_count_  = 1;
     std::uint64_t      ptr_entry_loc_  = 0;
+    bool               used_heuristic_layout_ = false;
+    bool               used_runtime_fallback_ = false;
 };
 
 } // namespace KvcForensic::lsa

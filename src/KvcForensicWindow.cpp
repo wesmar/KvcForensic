@@ -670,6 +670,7 @@ void KvcForensicWindow::LoadDump(const std::wstring& path) {
     SetStatus(SB_FILE,  FileName(path).c_str());
     SetStatus(SB_BUILD, L"");
     SetStatus(SB_STATE, L"Analyzing...");
+    SetStatusWarningMode(false);
 
     // Disable File > Open while busy
     HMENU hBar = ::GetMenu(hwnd_);
@@ -683,6 +684,15 @@ void KvcForensicWindow::LoadDump(const std::wstring& path) {
         auto* result = new analysis::SafeAnalysisReport(engine.AnalyzeFile(path));
         ::PostMessageW(hwnd, WM_APP + 1, 0, reinterpret_cast<LPARAM>(result));
     });
+}
+
+void KvcForensicWindow::SetStatusWarningMode(const bool warning) {
+    if (!status_bar_) return;
+    if (warning) {
+        ::SendMessageW(status_bar_, SB_SETBKCOLOR, 0, static_cast<LPARAM>(RGB(170, 42, 42)));
+    } else {
+        ::SendMessageW(status_bar_, SB_SETBKCOLOR, 0, static_cast<LPARAM>(CLR_DEFAULT));
+    }
 }
 
 void KvcForensicWindow::OnAnalysisDone(analysis::SafeAnalysisReport* result) {
@@ -708,9 +718,18 @@ void KvcForensicWindow::OnAnalysisDone(analysis::SafeAnalysisReport* result) {
     }
 
     wchar_t state[64];
-    swprintf_s(state, L"%u session(s) found",
-        static_cast<unsigned>(report_.sessions.size()));
-    SetStatus(SB_STATE, state);
+    if (report_.selected_template.used_runtime_fallback) {
+        SetStatusWarningMode(true);
+        SetStatus(SB_STATE, L"[!] Heuristic fallback used");
+    } else if (report_.selected_template.used_heuristic_layout) {
+        SetStatusWarningMode(true);
+        SetStatus(SB_STATE, L"[!] Heuristic mode (template mismatch)");
+    } else {
+        SetStatusWarningMode(false);
+        swprintf_s(state, L"%u session(s) found",
+            static_cast<unsigned>(report_.sessions.size()));
+        SetStatus(SB_STATE, state);
+    }
     SetStatus(SB_FILE,  FileName(loaded_path_).c_str());
 
     PopulateTree();

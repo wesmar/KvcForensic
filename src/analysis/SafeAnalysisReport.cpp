@@ -76,6 +76,8 @@ SafeAnalysisReport SafeAnalysisEngine::AnalyzeFile(
         const bool initialized = walker.Initialize(build);
         report.selected_template.template_name      = walker.GetTemplateName();
         report.selected_template.min_supported_build = walker.GetTemplateMinBuild();
+        report.selected_template.used_heuristic_layout = walker.UsedHeuristicLayout();
+        report.selected_template.used_runtime_fallback = walker.UsedRuntimeFallback();
         if (initialized) {
             report.sessions = walker.Walk();
 

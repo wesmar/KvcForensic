@@ -17,6 +17,8 @@ struct LsaTemplateMetadata {
     std::wstring  template_name;
     std::uint32_t min_supported_build = 0;
     std::wstring  description;         // reserved for future use
+    bool used_heuristic_layout = false;
+    bool used_runtime_fallback = false;
 };
 
 struct SafeAnalysisReport {

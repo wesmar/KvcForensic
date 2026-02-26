@@ -166,7 +166,10 @@ void MsvWalker::ExtractCredmanCredentials(LogonSession& session) {
 
     int safety = 0;
     while (current_flink != sentinel && safety++ < 255) {
+        if (!vmem_.VaToRva(current_flink, kCredManEntryFlinkOffset + 8).has_value()) break;
+        if (current_flink < kCredManEntryFlinkOffset) break;
         const std::uint64_t entry_start = current_flink - kCredManEntryFlinkOffset;
+        if (!vmem_.VaToRva(entry_start, 200).has_value()) break;
 
         std::uint32_t cb_enc_password = 0;
         vmem_.ReadStruct(entry_start + kCredManEntryCbEncPwdOffset, &cb_enc_password);
@@ -199,6 +202,7 @@ void MsvWalker::ExtractCredmanCredentials(LogonSession& session) {
 
         std::uint64_t next = 0;
         if (!vmem_.ReadStruct(current_flink, &next)) break;
+        if (next != sentinel && next != 0 && !vmem_.VaToRva(next, 8).has_value()) break;
         current_flink = next;
     }
 }

@@ -32,6 +32,9 @@ LogonSessionWalker::LogonSessionWalker(
     , secrets_extractor_(std::make_unique<security::LsaSecretsExtractor>(vmem, metadata)) {}
 
 bool LogonSessionWalker::Initialize(std::uint32_t build_number) {
+    used_heuristic_layout_ = false;
+    used_runtime_fallback_ = false;
+
     if (secrets_extractor_)
         secrets_extractor_->Initialize(build_number);
 
@@ -66,7 +69,11 @@ bool LogonSessionWalker::IsReadablePointer(const std::uint64_t va, const std::si
 bool LogonSessionWalker::IsLikelyLuid(const std::uint64_t luid) {
     if (luid == 0) return false;
     const std::uint32_t high = static_cast<std::uint32_t>(luid >> 32);
-    return high == 0;
+    // Keep strict filtering (prefer classic low-32bit LUIDs), but allow
+    // small non-zero HighPart values seen on some builds.
+    if (high == 0) return true;
+    if (high == 0xFFFFFFFFu) return false;
+    return high <= 0x0000FFFFu;
 }
 
 int LogonSessionWalker::ScoreSessionFieldLayout(
@@ -145,6 +152,7 @@ bool LogonSessionWalker::ConfigureBestMsvTemplateAndLayout(const std::uint32_t /
             template_layout.credentials_ptr_offset = candidate->session_credentials_ptr_offset;
         } else {
             template_layout = DetectSessionFieldLayout();
+            used_heuristic_layout_ = true;
         }
 
         int score = ScoreSessionFieldLayout(template_layout, ptr_entry_loc_, session_count_);
@@ -159,11 +167,12 @@ bool LogonSessionWalker::ConfigureBestMsvTemplateAndLayout(const std::uint32_t /
                 if (shifted_score > score) {
                     score = shifted_score;
                     template_layout = shifted;
+                    used_heuristic_layout_ = true;
                 }
             }
         }
 
-        if (score > best.score) {
+        if (best.spec == nullptr || score > best.score) {
             best.spec = candidate;
             best.logon_list = logon_list;
             best.ptr_entry_loc = ptr_entry_loc_;
@@ -190,6 +199,13 @@ bool LogonSessionWalker::ConfigureBestMsvTemplateAndLayout(const std::uint32_t /
         active_msv_template_.session_domain_offset = session_layout_.domain_offset;
         active_msv_template_.session_sid_ptr_offset = session_layout_.sid_ptr_offset;
         active_msv_template_.session_credentials_ptr_offset = session_layout_.credentials_ptr_offset;
+        if (session_layout_.luid_offset != best.spec->session_luid_offset ||
+            session_layout_.username_offset != best.spec->session_username_offset ||
+            session_layout_.domain_offset != best.spec->session_domain_offset ||
+            session_layout_.sid_ptr_offset != best.spec->session_sid_ptr_offset ||
+            session_layout_.credentials_ptr_offset != best.spec->session_credentials_ptr_offset) {
+            used_heuristic_layout_ = true;
+        }
 
         if (best.spec->session_credentials_ptr_offset > 0 && best.spec->session_credman_ptr_offset > 0) {
             const auto delta = static_cast<std::ptrdiff_t>(session_layout_.credentials_ptr_offset) -
@@ -395,6 +411,8 @@ std::vector<LogonSession> LogonSessionWalker::Walk() {
         const int cur_score = ScoreSessionFieldLayout(session_layout_, ptr_entry_loc_, session_count_);
         const int det_score = ScoreSessionFieldLayout(detected, ptr_entry_loc_, session_count_);
         if (det_score > cur_score) {
+            used_runtime_fallback_ = true;
+            used_heuristic_layout_ = true;
             session_layout_ = detected;
             active_msv_template_.session_luid_offset = detected.luid_offset;
             active_msv_template_.session_username_offset = detected.username_offset;
