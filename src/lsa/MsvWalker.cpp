@@ -126,6 +126,8 @@ constexpr std::size_t kDecB_ShaStart    = 102;
 constexpr std::size_t kDecB_ShaEnd      = 122;
 constexpr std::size_t kDecB_DpapiStart  = 122;
 constexpr std::size_t kDecB_DpapiEnd    = 142;
+constexpr std::uint32_t kMaxCredentialsListNodes = 4096;
+constexpr std::uint32_t kMaxPrimaryCredentialsNodes = 4096;
 
 } // namespace
 
@@ -212,7 +214,9 @@ void MsvWalker::WalkCredentialsList(
     visited.insert(sentinel);
     std::uint64_t current = credentials_list_ptr;
 
-    while (current != 0 && current != sentinel) {
+    std::uint32_t safety = 0;
+    while (current != 0 && current != sentinel && safety++ < kMaxCredentialsListNodes) {
+        if (!vmem_.VaToRva(current, 24).has_value()) break;
         if (!visited.insert(current).second) break;
 
         std::uint64_t flink = 0;
@@ -241,7 +245,9 @@ void MsvWalker::WalkPrimaryCredentials(
     visited.insert(sentinel);
     std::uint64_t current = primary_ptr;
 
-    while (current != 0 && current != sentinel) {
+    std::uint32_t safety = 0;
+    while (current != 0 && current != sentinel && safety++ < kMaxPrimaryCredentialsNodes) {
+        if (!vmem_.VaToRva(current, 40).has_value()) break;
         if (!visited.insert(current).second) break;
 
         std::uint64_t flink = 0;

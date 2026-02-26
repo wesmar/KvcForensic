@@ -1,4 +1,5 @@
 #include "lsa/TemplateRegistry.h"
+#include "lsa/KirbiExporter.h"
 #include "KvcForensicWindow.h"
 #include "WindowsBuildInfo.h"
 #include "analysis/JsonReportBuilder.h"
@@ -31,6 +32,7 @@ struct CliOptions {
     std::wstring output_path = L"output_KvcForensic.txt";
     OutputFormat format = OutputFormat::Txt;
     std::optional<std::wstring> compare_path;
+    std::optional<std::wstring> export_tickets_dir;  // --export-tickets <dir>
 
     bool cli_mode = false;
     std::wstring cli_command;
@@ -70,16 +72,17 @@ OutputFormat ParseFormat(const std::wstring& value) {
 std::wstring BuildCliHelp() {
     return
         L"KvcForensic CLI usage:\n"
-        L"  KvcForensic.exe --analyze-dump [--input <file>] [--output <file>] [--format txt|json|both] [--compare <file>] [--force] [--full]\n"
+        L"  KvcForensic.exe --analyze-dump [--input <file>] [--output <file>] [--format txt|json|both] [--compare <file>] [--force] [--full] [--export-tickets <dir>]\n"
         L"  KvcForensic.exe --cli <command>\n"
         L"  KvcForensic.exe -cli <command>\n"
         L"  KvcForensic.exe --help\n\n"
         L"Options:\n"
-        L"  --full    Include metadata header (dump header/streams/modules/security) in TXT output.\n"
-        L"            Default: credentials only (FILE: header + logon sessions).\n\n"
+        L"  --full              Include metadata header in TXT output.\n"
+        L"  --export-tickets <dir>  Export Kerberos tickets as .kirbi and .ccache files.\n\n"
         L"Examples:\n"
         L"  KvcForensic.exe --analyze-dump --input dump.dmp --format both\n"
         L"  KvcForensic.exe --analyze-dump --input lsass.dmp --output output.txt --full\n"
+        L"  KvcForensic.exe --analyze-dump --input dump.dmp --export-tickets .\\tickets\\\n"
         L"  KvcForensic.exe --analyze-dump --input dump.dmp --format both --compare ref.txt --force\n"
         L"  KvcForensic.exe --cli \"whoami /all\"\n";
 }
@@ -159,6 +162,10 @@ CliParseResult ParseCli(const int argc, wchar_t** argv) {
         }
         if (_wcsicmp(arg.c_str(), L"--full") == 0) {
             options.full_report = true;
+            continue;
+        }
+        if (_wcsicmp(arg.c_str(), L"--export-tickets") == 0 && i + 1 < tokens.size()) {
+            options.export_tickets_dir = tokens[++i];
             continue;
         }
         result.show_help = true;
@@ -249,6 +256,13 @@ int RunDumpAnalysisMode(const CliOptions& options) {
         if (!KvcForensic::analysis::WriteUtf8File(target, json, nullptr)) {
             return 3;
         }
+    }
+
+    if (options.export_tickets_dir.has_value()) {
+        const std::wstring tickets_dir = BuildPathInCwd(options.export_tickets_dir.value());
+        const auto stats = KvcForensic::lsa::KirbiExporter::Export(report.sessions, tickets_dir);
+        wprintf(L"[+] Tickets exported: %zu .kirbi, %zu .ccache  (errors: %zu)  -> %s\n",
+                stats.kirbi_written, stats.ccache_written, stats.errors, tickets_dir.c_str());
     }
 
     return report.dump.valid ? 0 : 4;

@@ -28,6 +28,7 @@ struct LogonSession {
     std::vector<security::MsvCredential>      msv_credentials;
     std::vector<security::CredmanCredential>  credman_credentials;
     std::vector<security::WdigestCredential>  wdigest_credentials;
+    std::vector<security::TspkgCredential>    tspkg_credentials;
     std::vector<security::KerberosCredential> kerberos_credentials;
     std::vector<security::DpapiCredential>    dpapi_credentials;
 };
@@ -68,16 +69,27 @@ private:
 
     std::uint64_t       FindMsvLogonList();
     SessionFieldLayout  DetectSessionFieldLayout();
+    std::vector<LogonSession> EnumerateSessionsWithLayout(const SessionFieldLayout& layout) const;
+    bool IsReadablePointer(std::uint64_t va, std::size_t size = 1) const;
+    static bool IsLikelyLuid(std::uint64_t luid);
+    int ScoreSessionFieldLayout(
+        const SessionFieldLayout& layout,
+        std::uint64_t ptr_entry_loc,
+        std::uint32_t session_count) const;
+    bool ConfigureBestMsvTemplateAndLayout(std::uint32_t build_number);
 
     const core::VirtualMemory&          vmem_;
     const minidump::MinidumpMetadata&   metadata_;
 
     std::unique_ptr<security::LsaSecretsExtractor> secrets_extractor_;
 
+    std::vector<const templates::MsvTemplateSpec*> msv_template_candidates_;
     const templates::MsvTemplateSpec*      msv_template_      = nullptr;
+    templates::MsvTemplateSpec             active_msv_template_{};
     const templates::WdigestTemplateSpec*  wdigest_template_  = nullptr;
     const templates::KerberosTemplateSpec* kerberos_template_ = nullptr;
     const templates::DpapiTemplateSpec*    dpapi_template_    = nullptr;
+    const templates::TspkgTemplateSpec*    tspkg_template_    = nullptr;
 
     SessionFieldLayout session_layout_{};
     std::uint64_t      logon_list_va_  = 0;

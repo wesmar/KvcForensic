@@ -90,6 +90,17 @@ struct WdigestCredential {
     std::wstring to_wstring() const;
 };
 
+// TSPKG (Terminal Services) credential. Decrypted from tspkg.dll list.
+// Contains inline MSV1_0_INTERACTIVE_LOGON / KERB_INTERACTIVE_LOGON struct.
+struct TspkgCredential {
+    std::uint64_t luid = 0;
+    std::wstring username;
+    std::wstring domainname;
+    std::wstring password;
+    std::wstring password_hex;
+    std::wstring to_wstring() const;
+};
+
 struct KerberosTicket {
     std::wstring service_name;
     std::wstring target_name;

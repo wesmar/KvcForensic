@@ -89,12 +89,45 @@ bool ContainsI(const std::wstring& text, const wchar_t* needle) {
     return core::ContainsInsensitive(text, needle);
 }
 
+bool IsSystemLikePrincipal(const std::wstring& user, const std::wstring& domain) {
+    if (user.empty()) return true;
+    if (StartsWithI(user, L"DWM-") || StartsWithI(user, L"UMFD-")) return true;
+    if (EndsWithI(user, L"$")) return true;
+    if (ContainsI(user, L"local service") || ContainsI(user, L"network service") || ContainsI(user, L"system")) {
+        return true;
+    }
+    if (ContainsI(domain, L"window manager") || ContainsI(domain, L"font driver")) {
+        return true;
+    }
+    return false;
+}
+
+bool IsUserLikePrincipal(const std::wstring& user, const std::wstring& domain) {
+    return !user.empty() && !IsSystemLikePrincipal(user, domain);
+}
+
 enum class SessionClass {
     User,
     Virtual,
     Machine,
     System
 };
+
+bool HasUserLikeCredentialIdentity(const lsa::LogonSession& s) {
+    for (const auto& c : s.msv_credentials) {
+        if (IsUserLikePrincipal(c.username, c.domainname)) return true;
+    }
+    for (const auto& c : s.credman_credentials) {
+        if (IsUserLikePrincipal(c.username, c.domainname)) return true;
+    }
+    for (const auto& c : s.wdigest_credentials) {
+        if (IsUserLikePrincipal(c.username, c.domainname)) return true;
+    }
+    for (const auto& c : s.kerberos_credentials) {
+        if (IsUserLikePrincipal(c.username, c.domainname)) return true;
+    }
+    return false;
+}
 
 SessionClass ClassifySession(const lsa::LogonSession& s) {
     const bool sid_virtual = s.sid.rfind("S-1-5-83-", 0) == 0;
@@ -103,6 +136,9 @@ SessionClass ClassifySession(const lsa::LogonSession& s) {
 
     if (sid_virtual || ContainsI(s.domainname, L"virtual machine")) {
         return SessionClass::Virtual;
+    }
+    if (IsUserLikePrincipal(s.username, s.domainname) || HasUserLikeCredentialIdentity(s)) {
+        return SessionClass::User;
     }
     if (StartsWithI(s.username, L"DWM-") ||
         StartsWithI(s.username, L"UMFD-") ||
@@ -121,6 +157,7 @@ SessionClass ClassifySession(const lsa::LogonSession& s) {
 
 bool HasInterestingSecrets(const lsa::LogonSession& s) {
     return !s.msv_credentials.empty() || !s.credman_credentials.empty()
+        || !s.wdigest_credentials.empty() || !s.tspkg_credentials.empty()
         || !s.kerberos_credentials.empty() || !s.dpapi_credentials.empty();
 }
 
@@ -129,7 +166,7 @@ bool ShouldShowSession(const lsa::LogonSession& s, bool show_all_accounts) {
 
     const SessionClass cls = ClassifySession(s);
     if (cls == SessionClass::User || cls == SessionClass::Virtual) return true;
-    if (cls == SessionClass::Machine) return HasInterestingSecrets(s);
+    if (cls == SessionClass::Machine) return HasInterestingSecrets(s) || HasUserLikeCredentialIdentity(s);
     return false;
 }
 

@@ -25,11 +25,28 @@ Parses a full-memory `lsass.dmp` minidump and extracts credentials from the foll
 |------------|---------------------------------------------------------|
 | MSV1_0     | NT hash, LM hash, SHA1, DPAPI blob                     |
 | WDigest    | Cleartext password (when available)                     |
+| TSPKG      | RDP-related credentials from tspkg.dll                  |
 | Kerberos   | Username, domain, cleartext password, ticket list       |
 | CredMan    | Credential Manager stored entries                       |
 | DPAPI      | MasterKey cache entries, decrypted masterkey, SHA1      |
 
 Output formats: plain text report and/or structured JSON.
+
+---
+
+## In progress (high priority)
+
+The following items are currently in progress and are treated as high-priority work:
+
+1. **TSPKG (Terminal Services Package) coverage hardening**
+   - Goal: reliable extraction from `tspkg.dll`, which may contain high-value cleartext RDP credentials.
+   - Scope: stabilize `tspkg_x64` template coverage across Windows build variants and improve walker robustness for list/sentinel edge cases.
+   - Status: preliminary implementation is present (`tspkg_x64` templates, `TspkgWalker`, and session integration), with ongoing tuning and validation.
+
+2. **Kerberos ticket export (`.kirbi` / `.ccache`)**
+   - Goal: make ticket extraction operationally useful by exporting parsed tickets directly to standard formats.
+   - Scope: improve export completeness, compatibility, and handling of malformed/partial ticket data.
+   - Status: implementation exists and is being hardened for consistent cross-dump behavior.
 
 ---
 
@@ -173,7 +190,7 @@ After studying the source of both mimikatz and pypykatz, several design decision
 ## CLI usage
 
 ```
-KvcForensic.exe --analyze-dump [--input <file>] [--output <file>] [--format txt|json|both] [--compare <ref>] [--force] [--full]
+KvcForensic.exe --analyze-dump [--input <file>] [--output <file>] [--format txt|json|both] [--compare <ref>] [--force] [--full] [--export-tickets <dir>]
 KvcForensic.exe --cli "<command>"
 KvcForensic.exe -cli "<command>"
 KvcForensic.exe --help
@@ -193,6 +210,8 @@ KvcForensic.exe --help
 
 `--full` -- include full metadata in the text report: dump header, stream list, module list, and security package presence checks. Without this flag, output contains only the credential header and logon sessions.
 
+`--export-tickets <dir>` -- export Kerberos tickets as `.kirbi` / `.ccache` files to the target directory. This feature is currently **in progress** and should be treated as **experimental**.
+
 `--help` / `-h` / `/?` -- print usage and exit.
 
 **Examples:**
@@ -209,6 +228,9 @@ KvcForensic.exe --analyze-dump --input dump.dmp --output result.txt --format bot
 
 # Override build detection with the current machine's build
 KvcForensic.exe --analyze-dump --input dump.dmp --force
+
+# Experimental: export Kerberos tickets to .kirbi/.ccache
+KvcForensic.exe --analyze-dump --input dump.dmp --export-tickets .\tickets
 
 # Run a command as TrustedInstaller
 KvcForensic.exe --cli "cmd.exe /c whoami /all"

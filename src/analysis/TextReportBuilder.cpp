@@ -156,6 +156,19 @@ void AppendCredentials(std::wstringstream& ss, const SafeAnalysisReport& report)
             ss << L"\t\tpassword (hex) " << c.password_hex << L"\r\n";
         }
 
+        // TSPKG (Terminal Services / RDP)
+        const auto tspkg_deduped = Dedup(s.tspkg_credentials, [](const auto& c) {
+            return c.username + L"|" + c.domainname + L"|" + c.password;
+        });
+        for (const auto& cref : tspkg_deduped) {
+            const auto& c = cref.get();
+            ss << L"\t== TSPKG [" << LuidHex(c.luid) << L"]==\r\n";
+            ss << L"\t\tusername "       << c.username   << L"\r\n";
+            ss << L"\t\tdomainname "     << c.domainname << L"\r\n";
+            ss << L"\t\tpassword "       << (c.password.empty() ? L"None" : c.password) << L"\r\n";
+            ss << L"\t\tpassword (hex) " << c.password_hex << L"\r\n";
+        }
+
         // Kerberos
         const auto kerb_deduped = Dedup(s.kerberos_credentials, [](const auto& c) {
             return c.username + L"|" + c.domainname;

@@ -68,6 +68,23 @@ std::wstring BuildJsonReport(const SafeAnalysisReport& report) {
         }
         ss << (first ? L"" : L"\n") << L"      ],\n";
 
+        // TSPKG
+        ss << L"      \"tspkg\": [\n";
+        const auto tspkg_deduped = Dedup(s.tspkg_credentials, [](const auto& c) {
+            return c.username + L"|" + c.domainname + L"|" + c.password;
+        });
+        first = true;
+        for (const auto& cref : tspkg_deduped) {
+            const auto& c = cref.get();
+            if (!first) ss << L",\n"; first = false;
+            ss << L"        {\n";
+            ss << L"          \"username\": "   << JStr(c.username)   << L",\n";
+            ss << L"          \"domainname\": " << JStr(c.domainname) << L",\n";
+            ss << L"          \"password\": "   << (c.password.empty() ? L"null" : JStr(c.password)) << L"\n";
+            ss << L"        }";
+        }
+        ss << (first ? L"" : L"\n") << L"      ],\n";
+
         // Kerberos
         ss << L"      \"kerberos\": [\n";
         const auto kerb_deduped = Dedup(s.kerberos_credentials, [](const auto& c) {

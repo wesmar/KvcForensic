@@ -70,6 +70,12 @@
     <ClCompile Include="src\lsa\WdigestWalker.cpp">
       <Filter>source\lsa</Filter>
     </ClCompile>
+    <ClCompile Include="src\lsa\TspkgWalker.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lsa\KirbiExporter.cpp">
+      <Filter>source\lsa</Filter>
+    </ClCompile>
     <ClCompile Include="src\lsa\KerberosWalker.cpp">
       <Filter>source\lsa</Filter>
     </ClCompile>
@@ -113,6 +119,9 @@
       <Filter>source\security</Filter>
     </ClCompile>
     <ClCompile Include="src\security\TrustedInstaller.cpp">
+      <Filter>source\security</Filter>
+    </ClCompile>
+    <ClCompile Include="src\security\TspkgPackage.cpp">
       <Filter>source\security</Filter>
     </ClCompile>
     <ClCompile Include="src\security\WDigestPackage.cpp">
@@ -172,6 +181,12 @@
     <ClInclude Include="src\lsa\WdigestWalker.h">
       <Filter>headers\lsa</Filter>
     </ClInclude>
+    <ClInclude Include="src\lsa\TspkgWalker.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
+    <ClInclude Include="src\lsa\KirbiExporter.h">
+      <Filter>headers\lsa</Filter>
+    </ClInclude>
     <ClInclude Include="src\lsa\KerberosWalker.h">
       <Filter>headers\lsa</Filter>
     </ClInclude>
@@ -224,6 +239,9 @@
       <Filter>headers\security</Filter>
     </ClInclude>
     <ClInclude Include="src\security\TrustedInstaller.h">
+      <Filter>headers\security</Filter>
+    </ClInclude>
+    <ClInclude Include="src\security\TspkgPackage.h">
       <Filter>headers\security</Filter>
     </ClInclude>
     <ClInclude Include="src\security\WDigestPackage.h">

@@ -1,6 +1,7 @@
 #include "lsa/TemplateRegistry.h"
 
 #include <Windows.h>
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cctype>
@@ -34,6 +35,10 @@ std::vector<DpapiTemplateSpec> g_DpapiX64Templates = {
 std::vector<LsaSecretsTemplateSpec> g_LsaSecretsX64Templates = {
 };
 
+// tspkg_x64 is optional — missing section is not a fatal startup error.
+std::vector<TspkgTemplateSpec> g_TspkgX64Templates = {
+};
+
 std::wstring g_RegistryInitError;
 
 template <typename TSpec>
@@ -44,6 +49,18 @@ const TSpec* SelectByBuild(const std::vector<TSpec>& table, const std::uint32_t 
         }
     }
     return nullptr;
+}
+
+std::vector<const MsvTemplateSpec*> SelectAllMsvByBuild(
+    const std::vector<MsvTemplateSpec>& table,
+    const std::uint32_t build_number) {
+    std::vector<const MsvTemplateSpec*> out;
+    for (const auto& spec : table) {
+        if (build_number >= spec.min_build && build_number <= spec.max_build) {
+            out.push_back(&spec);
+        }
+    }
+    return out;
 }
 
 std::vector<std::uint8_t> ParseHex(const std::string& hex) {
@@ -634,6 +651,45 @@ bool ParseDpapiTemplate(JsonCursor& c, DpapiTemplateSpec& spec) {
     return false;
 }
 
+bool ParseTspkgTemplate(JsonCursor& c, TspkgTemplateSpec& spec) {
+    spec.max_build = kBuildMax;
+    spec.luid_offset    = 16;
+    spec.primary_offset = 24;
+    spec.blob_header_skip = 0;
+    if (!c.Expect('{')) return false;
+    if (c.Consume('}')) return true;
+    while (c.ok()) {
+        std::string key;
+        if (!c.ParseString(key) || !c.Expect(':')) return false;
+        if (key == "name") {
+            std::string v;
+            if (!c.ParseString(v)) return false;
+            spec.name = Utf8ToWide(v);
+        } else if (key == "min_build") {
+            if (!c.ParseUint32(spec.min_build)) return false;
+        } else if (key == "max_build") {
+            if (!c.ParseUint32(spec.max_build)) return false;
+        } else if (key == "signature") {
+            std::string v;
+            if (!c.ParseString(v)) return false;
+            spec.signature = ParseHex(v);
+        } else if (key == "first_entry_offset") {
+            if (!c.ParseInt(spec.first_entry_offset)) return false;
+        } else if (key == "luid_offset") {
+            if (!c.ParseSize(spec.luid_offset)) return false;
+        } else if (key == "primary_offset") {
+            if (!c.ParseSize(spec.primary_offset)) return false;
+        } else if (key == "blob_header_skip") {
+            if (!c.ParseSize(spec.blob_header_skip)) return false;
+        } else if (!c.SkipValue()) {
+            return false;
+        }
+        if (c.Consume('}')) return true;
+        if (!c.Expect(',')) return false;
+    }
+    return false;
+}
+
 bool ParseLsaSecretsTemplate(JsonCursor& c, LsaSecretsTemplateSpec& spec) {
     spec.max_build = kBuildMax;
     if (!c.Expect('{')) {
@@ -693,12 +749,14 @@ struct RegistryConfig {
     bool has_kerberos_x64 = false;
     bool has_dpapi_x64 = false;
     bool has_lsa_secrets_x64 = false;
+    bool has_tspkg_x64 = false;
 
     std::vector<MsvTemplateSpec> msv_x64;
     std::vector<WdigestTemplateSpec> wdigest_x64;
     std::vector<KerberosTemplateSpec> kerberos_x64;
     std::vector<DpapiTemplateSpec> dpapi_x64;
     std::vector<LsaSecretsTemplateSpec> lsa_secrets_x64;
+    std::vector<TspkgTemplateSpec> tspkg_x64;
 };
 
 bool ParseRegistryConfig(const std::string& text, RegistryConfig& out) {
@@ -740,6 +798,11 @@ bool ParseRegistryConfig(const std::string& text, RegistryConfig& out) {
             if (!ParseArray(c, out.lsa_secrets_x64, ParseLsaSecretsTemplate)) {
                 return false;
             }
+        } else if (key == "tspkg_x64") {
+            out.has_tspkg_x64 = true;
+            if (!ParseArray(c, out.tspkg_x64, ParseTspkgTemplate)) {
+                return false;
+            }
         } else if (!c.SkipValue()) {
             return false;
         }
@@ -755,25 +818,39 @@ bool ParseRegistryConfig(const std::string& text, RegistryConfig& out) {
 }
 
 template<typename TSpec>
-bool ValidateBuildRanges(const std::vector<TSpec>& specs) {
+bool ValidateBuildRanges(const std::vector<TSpec>& specs, const bool allow_overlaps) {
+    struct Range {
+        std::uint32_t min_build = 0;
+        std::uint32_t max_build = 0;
+    };
+    std::vector<Range> ranges;
+    ranges.reserve(specs.size());
     for (const auto& spec : specs) {
         if (spec.min_build > spec.max_build) {
             return false;
         }
+        ranges.push_back({spec.min_build, spec.max_build});
     }
-    return true;
-}
 
-bool ValidateMsvSpecs(const std::vector<MsvTemplateSpec>& specs) {
-    if (!ValidateBuildRanges(specs)) {
-        return false;
-    }
-    for (const auto& spec : specs) {
-        if (spec.signature.empty()) {
+    std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
+        if (a.min_build != b.min_build) return a.min_build < b.min_build;
+        return a.max_build < b.max_build;
+    });
+
+    for (std::size_t i = 0; i < ranges.size(); ++i) {
+        if (i > 0 && ranges[i].min_build <= ranges[i - 1].max_build && !allow_overlaps) {
             return false;
         }
-        if (spec.parser_support) {
-            if (spec.session_luid_offset == 0 || spec.session_credentials_ptr_offset == 0) {
+        if (allow_overlaps) {
+            int overlap_count = 0;
+            for (std::size_t j = 0; j < ranges.size(); ++j) {
+                if (ranges[j].max_build < ranges[i].min_build || ranges[j].min_build > ranges[i].max_build) {
+                    continue;
+                }
+                ++overlap_count;
+            }
+            // Guard against pathological configs that make template selection ambiguous.
+            if (overlap_count > 4) {
                 return false;
             }
         }
@@ -781,8 +858,53 @@ bool ValidateMsvSpecs(const std::vector<MsvTemplateSpec>& specs) {
     return true;
 }
 
+bool ValidateMsvSpecs(const std::vector<MsvTemplateSpec>& specs) {
+    if (!ValidateBuildRanges(specs, true)) {
+        return false;
+    }
+    for (const auto& spec : specs) {
+        if (spec.signature.empty()) {
+            return false;
+        }
+        if (std::abs(spec.first_entry_offset) > 256 || std::abs(spec.offset2) > 256) {
+            return false;
+        }
+        if (spec.first_entry_offset_correction < 0 || spec.first_entry_offset_correction > 256) {
+            return false;
+        }
+        if (spec.parser_support) {
+            if (spec.session_luid_offset == 0 ||
+                spec.session_username_offset == 0 ||
+                spec.session_domain_offset == 0 ||
+                spec.session_sid_ptr_offset == 0 ||
+                spec.session_credentials_ptr_offset == 0) {
+                return false;
+            }
+            if (spec.session_username_offset <= spec.session_luid_offset ||
+                spec.session_domain_offset <= spec.session_username_offset ||
+                spec.session_sid_ptr_offset <= spec.session_domain_offset ||
+                spec.session_credentials_ptr_offset <= spec.session_sid_ptr_offset) {
+                return false;
+            }
+            const auto span = spec.session_credentials_ptr_offset - spec.session_luid_offset;
+            if (span > 0x300) {
+                return false;
+            }
+            if (spec.session_credman_ptr_offset != 0) {
+                if (spec.session_credman_ptr_offset <= spec.session_credentials_ptr_offset) {
+                    return false;
+                }
+                if ((spec.session_credman_ptr_offset - spec.session_credentials_ptr_offset) > 0x120) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 bool ValidateWdigestSpecs(const std::vector<WdigestTemplateSpec>& specs) {
-    if (!ValidateBuildRanges(specs)) {
+    if (!ValidateBuildRanges(specs, false)) {
         return false;
     }
     for (const auto& spec : specs) {
@@ -794,7 +916,7 @@ bool ValidateWdigestSpecs(const std::vector<WdigestTemplateSpec>& specs) {
 }
 
 bool ValidateKerberosSpecs(const std::vector<KerberosTemplateSpec>& specs) {
-    if (!ValidateBuildRanges(specs)) {
+    if (!ValidateBuildRanges(specs, false)) {
         return false;
     }
     for (const auto& spec : specs) {
@@ -825,7 +947,7 @@ bool ValidateKerberosSpecs(const std::vector<KerberosTemplateSpec>& specs) {
 }
 
 bool ValidateDpapiSpecs(const std::vector<DpapiTemplateSpec>& specs) {
-    if (!ValidateBuildRanges(specs)) {
+    if (!ValidateBuildRanges(specs, false)) {
         return false;
     }
     for (const auto& spec : specs) {
@@ -837,7 +959,7 @@ bool ValidateDpapiSpecs(const std::vector<DpapiTemplateSpec>& specs) {
 }
 
 bool ValidateLsaSecretsSpecs(const std::vector<LsaSecretsTemplateSpec>& specs) {
-    if (!ValidateBuildRanges(specs)) {
+    if (!ValidateBuildRanges(specs, false)) {
         return false;
     }
     for (const auto& spec : specs) {
@@ -854,6 +976,14 @@ bool ValidateLsaSecretsSpecs(const std::vector<LsaSecretsTemplateSpec>& specs) {
     return true;
 }
 
+bool ValidateTspkgSpecs(const std::vector<TspkgTemplateSpec>& specs) {
+    if (!ValidateBuildRanges(specs, false)) return false;
+    for (const auto& spec : specs) {
+        if (spec.signature.empty()) return false;
+    }
+    return true;
+}
+
 } // namespace
 
 bool InitializeRegistry(const std::wstring& json_path) {
@@ -865,6 +995,7 @@ bool InitializeRegistry(const std::wstring& json_path) {
     g_KerberosX64Templates.clear();
     g_DpapiX64Templates.clear();
     g_LsaSecretsX64Templates.clear();
+    g_TspkgX64Templates.clear();
 
     std::ifstream file(json_path);
     if (!file.is_open()) {
@@ -937,6 +1068,12 @@ bool InitializeRegistry(const std::wstring& json_path) {
     g_KerberosX64Templates = std::move(cfg.kerberos_x64);
     g_DpapiX64Templates = std::move(cfg.dpapi_x64);
     g_LsaSecretsX64Templates = std::move(cfg.lsa_secrets_x64);
+    // tspkg_x64 is optional — skip validation failure if the section is absent.
+    if (cfg.has_tspkg_x64 && !ValidateTspkgSpecs(cfg.tspkg_x64)) {
+        g_RegistryInitError = L"Invalid tspkg_x64 template values.";
+        return false;
+    }
+    g_TspkgX64Templates = std::move(cfg.tspkg_x64);
     return true;
 }
 
@@ -946,6 +1083,10 @@ const wchar_t* GetRegistryInitError() {
 
 const MsvTemplateSpec* SelectMsvTemplateX64(const std::uint32_t build_number) {
     return SelectByBuild(g_MsvX64Templates, build_number);
+}
+
+std::vector<const MsvTemplateSpec*> SelectMsvTemplateCandidatesX64(const std::uint32_t build_number) {
+    return SelectAllMsvByBuild(g_MsvX64Templates, build_number);
 }
 
 const WdigestTemplateSpec* SelectWdigestTemplateX64(const std::uint32_t build_number) {
@@ -962,6 +1103,10 @@ const DpapiTemplateSpec* SelectDpapiTemplateX64(const std::uint32_t build_number
 
 const LsaSecretsTemplateSpec* SelectLsaSecretsTemplateX64(const std::uint32_t build_number) {
     return SelectByBuild(g_LsaSecretsX64Templates, build_number);
+}
+
+const TspkgTemplateSpec* SelectTspkgTemplateX64(const std::uint32_t build_number) {
+    return SelectByBuild(g_TspkgX64Templates, build_number);
 }
 
 } // namespace KvcForensic::lsa::templates

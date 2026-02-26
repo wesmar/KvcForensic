@@ -68,6 +68,8 @@
     <ClCompile Include="src\lsa\LsaReaderUtils.cpp" />
     <ClCompile Include="src\lsa\MsvWalker.cpp" />
     <ClCompile Include="src\lsa\WdigestWalker.cpp" />
+    <ClCompile Include="src\lsa\TspkgWalker.cpp" />
+    <ClCompile Include="src\lsa\KirbiExporter.cpp" />
     <ClCompile Include="src\lsa\KerberosWalker.cpp" />
     <ClCompile Include="src\lsa\DpapiWalker.cpp" />
     <ClCompile Include="src\lsa\TemplateRegistry.cpp" />
@@ -82,6 +84,7 @@
     <ClCompile Include="src\security\SecurityAnalysisEngine.cpp" />
     <ClCompile Include="src\security\SecurityPackageRegistry.cpp" />
     <ClCompile Include="src\security\TrustedInstaller.cpp" />
+    <ClCompile Include="src\security\TspkgPackage.cpp" />
     <ClCompile Include="src\security\WDigestPackage.cpp" />
     <ClCompile Include="src\security\DpapiPackage.cpp" />
     <ClCompile Include="src\WindowsBuildInfo.cpp" />
@@ -103,6 +106,8 @@
     <ClInclude Include="src\lsa\LsaReaderUtils.h" />
     <ClInclude Include="src\lsa\MsvWalker.h" />
     <ClInclude Include="src\lsa\WdigestWalker.h" />
+    <ClInclude Include="src\lsa\TspkgWalker.h" />
+    <ClInclude Include="src\lsa\KirbiExporter.h" />
     <ClInclude Include="src\lsa\KerberosWalker.h" />
     <ClInclude Include="src\lsa\DpapiWalker.h" />
     <ClInclude Include="src\lsa\TemplateRegistry.h" />
@@ -120,6 +125,7 @@
     <ClInclude Include="src\security\SecurityPackageRegistry.h" />
     <ClInclude Include="src\security\SecurityPackageReport.h" />
     <ClInclude Include="src\security\TrustedInstaller.h" />
+    <ClInclude Include="src\security\TspkgPackage.h" />
     <ClInclude Include="src\security\WDigestPackage.h" />
     <ClInclude Include="src\security\DpapiPackage.h" />
     <ClInclude Include="src\WindowsBuildInfo.h" />
