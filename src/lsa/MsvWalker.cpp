@@ -72,7 +72,7 @@ constexpr std::size_t kCredManEntryUserOffset      = 168;
 constexpr std::size_t kCredManEntryServer2Offset   = 192;
 
 // ---------------------------------------------------------------------------
-// MSV1_0_PRIMARY_CREDENTIAL_11_H24_DEC (x64, decrypted payload, build 26100+)
+// Common decrypted MSV credential header on x64.
 //
 //   domain   (LSA_UNICODE_STRING):
 //     Length         @ +0   (2 B)
@@ -84,19 +84,26 @@ constexpr std::size_t kCredManEntryServer2Offset   = 192;
 //     Buffer         @ +24  (8 B)
 //
 //   Flags:
-//     isDPAPIProtected @ +40  — format discriminator: 0=A, 1=B
+//     isIso            @ +40
 //     isNtOwfPassword  @ +41
 //     isLmOwfPassword  @ +42
 //     isShaOwfPassword @ +43
-//     isDPAPILimitedKey@ +44
+//     isDPAPIProtected @ +44
 //
-//   Format A (isDPAPIProtected == 0):
+// Legacy layout (1607-23H2):
+//     isoSize          @ +52
+//     DPAPIProtected   @ +54 .. +73
+//     NtOwfPassword    @ +74 .. +89
+//     LmOwfPassword    @ +90 .. +105
+//     ShaOwfPassword   @ +106 .. +125
+//
+// 24H2+ layout A (isIso == 0):
 //     DPAPILimitedKey  [+50 .. +69]  (20 B)
 //     NtOwfPassword    [+70 .. +85]  (16 B)
 //     LmOwfPassword    [+86 .. +101] (16 B, usually zeroed)
 //     ShaOwfPassword   [+102 .. +121](20 B)
 //
-//   Format B (isDPAPIProtected == 1):
+// 24H2+ layout B (isIso != 0):
 //     NtOwfPassword    [+50 .. +65]  (16 B)
 //     ShaOwfPassword   [+102 .. +121](20 B)
 //     DPAPILimitedKey  [+122 .. +141](20 B)
@@ -105,17 +112,33 @@ constexpr std::size_t kDecDomainLenOffset      = 0;
 constexpr std::size_t kDecDomainBufOffset      = 8;
 constexpr std::size_t kDecUserLenOffset        = 16;
 constexpr std::size_t kDecUserBufOffset        = 24;
-constexpr std::size_t kDecFlagDpapiProtected   = 40;
+constexpr std::size_t kDecFlagIsIso            = 40;
 constexpr std::size_t kDecFlagIsNt             = 41;
+constexpr std::size_t kDecFlagIsLm             = 42;
 constexpr std::size_t kDecFlagIsSha            = 43;
 constexpr std::size_t kDecFlagIsDpapi          = 44;
-constexpr std::size_t kDecMinSize              = 88; // minimum to safely read flags
+
+// Legacy (Windows 10 / Windows 11 before 24H2)
+constexpr std::size_t kDecLegacyMinSize        = 74;
+constexpr std::size_t kDecLegacyDpapiStart     = 54;
+constexpr std::size_t kDecLegacyDpapiEnd       = 74;
+constexpr std::size_t kDecLegacyNtStart        = 74;
+constexpr std::size_t kDecLegacyNtEnd          = 90;
+constexpr std::size_t kDecLegacyLmStart        = 90;
+constexpr std::size_t kDecLegacyLmEnd          = 106;
+constexpr std::size_t kDecLegacyShaStart       = 106;
+constexpr std::size_t kDecLegacyShaEnd         = 126;
+
+// 24H2+
+constexpr std::size_t kDec24MinSize            = 88; // minimum to safely read flags
 
 // Format A field ranges
 constexpr std::size_t kDecA_DpapiStart  = 50;
 constexpr std::size_t kDecA_DpapiEnd    = 70;
 constexpr std::size_t kDecA_NtStart     = 70;
 constexpr std::size_t kDecA_NtEnd       = 86;
+constexpr std::size_t kDecA_LmStart     = 86;
+constexpr std::size_t kDecA_LmEnd       = 102;
 constexpr std::size_t kDecA_ShaStart    = 102;
 constexpr std::size_t kDecA_ShaEnd      = 122;
 
@@ -147,6 +170,14 @@ void MsvWalker::ExtractCredentials(LogonSession& session) {
     if (session.credentials_list_ptr == 0) return;
     const std::uint64_t sentinel = session.address + credentials_ptr_offset_;
     WalkCredentialsList(session.credentials_list_ptr, sentinel, session.msv_credentials);
+    for (auto& cred : session.msv_credentials) {
+        if (cred.username.empty()) {
+            cred.username = session.username;
+        }
+        if (cred.domainname.empty()) {
+            cred.domainname = session.domainname;
+        }
+    }
 }
 
 void MsvWalker::ExtractCredmanCredentials(LogonSession& session) {
@@ -286,7 +317,7 @@ security::MsvCredential MsvWalker::DecryptPrimaryCredential(
 
     if (extractor_ && extractor_->IsInitialized()) {
         auto decrypted = extractor_->Decrypt(encrypted_data);
-        if (!decrypted.empty() && decrypted.size() >= kDecMinSize) {
+        if (!decrypted.empty() && decrypted.size() >= kDecLegacyMinSize) {
             std::uint16_t username_len = 0, domain_len = 0;
             std::uint64_t username_buffer = 0, domain_buffer = 0;
 
@@ -295,8 +326,9 @@ security::MsvCredential MsvWalker::DecryptPrimaryCredential(
             std::memcpy(&username_len,    decrypted.data() + kDecUserLenOffset,   2);
             std::memcpy(&username_buffer, decrypted.data() + kDecUserBufOffset,   8);
 
-            const auto is_dpapi_protected = static_cast<std::uint8_t>(decrypted[kDecFlagDpapiProtected]);
+            const auto is_iso   = static_cast<std::uint8_t>(decrypted[kDecFlagIsIso]);
             const auto is_nt    = static_cast<std::uint8_t>(decrypted[kDecFlagIsNt]);
+            const auto is_lm    = static_cast<std::uint8_t>(decrypted[kDecFlagIsLm]);
             const auto is_sha   = static_cast<std::uint8_t>(decrypted[kDecFlagIsSha]);
             const auto is_dpapi = static_cast<std::uint8_t>(decrypted[kDecFlagIsDpapi]);
 
@@ -311,31 +343,60 @@ security::MsvCredential MsvWalker::DecryptPrimaryCredential(
                     cred.domainname = Utf16ToWString(bytes);
             }
 
-            if (is_dpapi_protected == 0) {
-                // Format A: DPAPILimitedKey, NT, LM, SHA
-                if (is_dpapi && decrypted.size() >= kDecA_DpapiEnd)
-                    cred.dpapi.assign(decrypted.begin() + kDecA_DpapiStart,
-                                      decrypted.begin() + kDecA_DpapiEnd);
-                if (is_nt && decrypted.size() >= kDecA_NtEnd)
-                    cred.nt_hash.assign(decrypted.begin() + kDecA_NtStart,
-                                        decrypted.begin() + kDecA_NtEnd);
-                if (is_sha && decrypted.size() >= kDecA_ShaEnd)
-                    cred.sha1_hash.assign(decrypted.begin() + kDecA_ShaStart,
-                                          decrypted.begin() + kDecA_ShaEnd);
-            } else {
-                // Format B: NT, SHA, DPAPILimitedKey
-                if (is_nt && decrypted.size() >= kDecB_NtEnd)
-                    cred.nt_hash.assign(decrypted.begin() + kDecB_NtStart,
-                                        decrypted.begin() + kDecB_NtEnd);
-                if (is_sha && decrypted.size() >= kDecB_ShaEnd)
-                    cred.sha1_hash.assign(decrypted.begin() + kDecB_ShaStart,
-                                          decrypted.begin() + kDecB_ShaEnd);
-                if (is_dpapi && decrypted.size() >= kDecB_DpapiEnd)
-                    cred.dpapi.assign(decrypted.begin() + kDecB_DpapiStart,
-                                      decrypted.begin() + kDecB_DpapiEnd);
+            if (tmpl_ != nullptr && tmpl_->max_build < 26100) {
+                if (is_dpapi && decrypted.size() >= kDecLegacyDpapiEnd) {
+                    cred.dpapi.assign(decrypted.begin() + kDecLegacyDpapiStart,
+                                      decrypted.begin() + kDecLegacyDpapiEnd);
+                }
+                if (is_iso == 0) {
+                    if (is_nt && decrypted.size() >= kDecLegacyNtEnd) {
+                        cred.nt_hash.assign(decrypted.begin() + kDecLegacyNtStart,
+                                            decrypted.begin() + kDecLegacyNtEnd);
+                    }
+                    if (is_lm && decrypted.size() >= kDecLegacyLmEnd) {
+                        cred.lm_hash.assign(decrypted.begin() + kDecLegacyLmStart,
+                                            decrypted.begin() + kDecLegacyLmEnd);
+                    }
+                    if (is_sha && decrypted.size() >= kDecLegacyShaEnd) {
+                        cred.sha1_hash.assign(decrypted.begin() + kDecLegacyShaStart,
+                                              decrypted.begin() + kDecLegacyShaEnd);
+                    }
+                }
+                return cred;
             }
-            return cred;
-        } else if (!decrypted.empty()) {
+
+            if (decrypted.size() >= kDec24MinSize) {
+                if (is_iso == 0) {
+                    // Format A: DPAPILimitedKey, NT, LM, SHA
+                    if (is_dpapi && decrypted.size() >= kDecA_DpapiEnd)
+                        cred.dpapi.assign(decrypted.begin() + kDecA_DpapiStart,
+                                          decrypted.begin() + kDecA_DpapiEnd);
+                    if (is_nt && decrypted.size() >= kDecA_NtEnd)
+                        cred.nt_hash.assign(decrypted.begin() + kDecA_NtStart,
+                                            decrypted.begin() + kDecA_NtEnd);
+                    if (is_lm && decrypted.size() >= kDecA_LmEnd)
+                        cred.lm_hash.assign(decrypted.begin() + kDecA_LmStart,
+                                            decrypted.begin() + kDecA_LmEnd);
+                    if (is_sha && decrypted.size() >= kDecA_ShaEnd)
+                        cred.sha1_hash.assign(decrypted.begin() + kDecA_ShaStart,
+                                              decrypted.begin() + kDecA_ShaEnd);
+                } else {
+                    // Format B: NT, SHA, DPAPILimitedKey
+                    if (is_nt && decrypted.size() >= kDecB_NtEnd)
+                        cred.nt_hash.assign(decrypted.begin() + kDecB_NtStart,
+                                            decrypted.begin() + kDecB_NtEnd);
+                    if (is_sha && decrypted.size() >= kDecB_ShaEnd)
+                        cred.sha1_hash.assign(decrypted.begin() + kDecB_ShaStart,
+                                              decrypted.begin() + kDecB_ShaEnd);
+                    if (is_dpapi && decrypted.size() >= kDecB_DpapiEnd)
+                        cred.dpapi.assign(decrypted.begin() + kDecB_DpapiStart,
+                                          decrypted.begin() + kDecB_DpapiEnd);
+                }
+                return cred;
+            }
+        }
+
+        if (!decrypted.empty()) {
             cred.dpapi.assign(encrypted_data.begin(), encrypted_data.end());
             return cred;
         }
