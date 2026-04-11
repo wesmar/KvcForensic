@@ -3,7 +3,7 @@
 ![KvcForensic](images/KvcForensic.jpg)
 
 Windows LSA credential parser for `lsass.dmp` minidumps.
-Active support targets: **Windows 11 24H2 / 25H2** (builds 26100+) and **Windows Server 2025**. Template entries for older builds are present in `KvcForensic.json` but credential decryption is not implemented for them.
+Active support targets: **Windows 11 24H2 / 25H2 / 26H1** (builds 26100+) and **Windows Server 2025**. Template entries for older builds are present in `KvcForensic.json` but credential decryption is not implemented for them.
 
 Built entirely on pure Win32 API. No runtime dependencies beyond the OS and the BCrypt primitive. No DbgHelp, no third-party libraries, no framework.
 
@@ -282,7 +282,8 @@ Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) req
 
 | Windows version         | Build range   | Credential extraction    |
 |-------------------------|---------------|--------------------------|
-| Windows 11 25H2         | 26200+        | Full                     |
+| Windows 11 26H1         | 28000+        | Full                     |
+| Windows 11 25H2         | 26200-27999   | Full                     |
 | Windows 11 24H2         | 26100-26199   | Full                     |
 | Windows Server 2025     | 26100+        | Full                     |
 | Windows 11 23H2 / 22H2  | 22621-22631   | Template only, no decryption |
@@ -290,7 +291,7 @@ Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) req
 
 Template entries for all builds from Windows 7 (7600) through Windows 11 21H2 are present in `KvcForensic.json` to allow signature location and session list traversal. Credential decryption is unavailable for these builds because the LSA key template does not cover them. Output for unsupported builds will contain session metadata (LUID, username, domain, SID) where the layout detection heuristic succeeds, but all credential fields will be empty.
 
-Primary development and validation target is Windows 11 25H2 (build 26200) and Windows 11 24H2 (build 26100).
+Primary development and validation target is Windows 11 26H1 (build 28000), Windows 11 25H2 (build 26200), and Windows 11 24H2 (build 26100).
 
 ---
 
