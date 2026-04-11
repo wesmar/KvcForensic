@@ -2,6 +2,7 @@
 
 #include "core/BinaryUtils.h"
 #include "core/StringUtils.h"
+#include "lsa/TemplateRegistry.h"
 
 #include <vector>
 
@@ -34,12 +35,38 @@ void MsvPackage::Analyze(const std::span<const std::byte> data) {
         }
     }
 
-    // Lightweight validation that the expected MSV list signature exists in mapped data.
-    const std::vector<std::uint8_t> x64_sig_25h2 = {
-        0x45, 0x89, 0x34, 0x24, 0x8b, 0xfb, 0x45, 0x85, 0xc0, 0x0f
-    };
-    const auto sig_hits = core::CountPatternOccurrences(data, x64_sig_25h2);
-    if (sig_hits > 0) {
+    std::vector<const lsa::templates::MsvTemplateSpec*> candidates;
+    if (metadata_ != nullptr && metadata_->system_info.has_value() && metadata_->system_info->valid) {
+        candidates = lsa::templates::SelectMsvTemplateCandidatesX64(metadata_->system_info->build);
+        if (candidates.empty()) {
+            if (const auto* single = lsa::templates::SelectMsvTemplateX64(metadata_->system_info->build);
+                single != nullptr) {
+                candidates.push_back(single);
+            }
+        }
+    }
+
+    bool signature_found = false;
+    for (const auto* candidate : candidates) {
+        if (candidate == nullptr || candidate->signature.empty()) {
+            continue;
+        }
+        if (core::CountPatternOccurrences(data, candidate->signature) > 0) {
+            signature_found = true;
+            break;
+        }
+    }
+
+    if (!signature_found) {
+        // Fallback for diagnostics before template registry initialization or when
+        // build metadata is unavailable.
+        const std::vector<std::uint8_t> x64_sig_25h2 = {
+            0x45, 0x89, 0x34, 0x24, 0x8b, 0xfb, 0x45, 0x85, 0xc0, 0x0f
+        };
+        signature_found = core::CountPatternOccurrences(data, x64_sig_25h2) > 0;
+    }
+
+    if (signature_found) {
         report_.notes.push_back(L"MSV signature candidate found in dump image.");
     } else {
         report_.notes.push_back(L"MSV signature candidate not found (may still be valid on other templates).");
