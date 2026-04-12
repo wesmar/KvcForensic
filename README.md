@@ -3,11 +3,11 @@
 ![KvcForensic](images/KvcForensic.jpg)
 
 Windows LSA credential parser for `lsass.dmp` minidumps.
-Active support targets: **Windows 11 24H2 / 25H2 / 26H1** (builds 26100+) and **Windows Server 2025**. A legacy decryption path is also implemented for **Windows 10 22H2** and related pre-24H2 builds; current in-repo validation covers **Windows 10 22H2 build 19045**.
+Active support targets: **Windows 11 24H2 / 25H2 / 26H1** (builds 26100+) and **Windows Server 2025**. A legacy decryption path is also implemented for **Windows 10 22H2** and related pre-24H2 builds; current in-repo validation covers **Windows 10 22H2 build 19045** and ticket-bearing **Windows 11 24H2 build 26100** dumps.
 
 Built entirely on pure Win32 API. No runtime dependencies beyond the OS and the BCrypt primitive. No DbgHelp, no third-party libraries, no framework.
 
-Binary size is under 300 KB when linked against the system CRT, and under 600 KB with the CRT statically embedded.
+Binary size is under 400 KB when linked against the system CRT, and under 700 KB with the CRT statically embedded.
 
 ---
 
@@ -52,7 +52,7 @@ The following items are currently in progress and are treated as high-priority w
 
 ## Obtaining the dump
 
-Standard tools (ProcDump, comsvcs.dll rundll32) fail against lsass.exe on modern Windows due to PPL (Protected Process Light) enforcement. To obtain a full-memory dump on Windows 11 24H2/25H2 with PPL active, use [kvc](https://github.com/wesmar/kvc), which bypasses PPL via kernel-level process protection manipulation:
+Standard tools (ProcDump, comsvcs.dll rundll32) fail against lsass.exe on modern Windows due to PPL (Protected Process Light) enforcement. To obtain a full-memory dump on Windows 11 24H2/25H2/26H1 with PPL active, use [kvc](https://github.com/wesmar/kvc), which bypasses PPL via kernel-level process protection manipulation:
 
 ```
 kvc.exe dump lsass
@@ -107,7 +107,7 @@ Each template entry defines:
 - Offsets relative to the signature match
 - `parser_support` flag (MSV only): whether full session field parsing is implemented for that build range
 
-Templates are selected at runtime by matching the build number from `SystemInfoStream` against each entry's range. The MSV array covers entries spanning Windows 7 (build 7600) through Windows 11 25H2 (build 26200+). WDigest has 2 entries, Kerberos 1, DPAPI 1, LSA secrets 1, and TSPKG templates are optional.
+Templates are selected at runtime by matching the build number from `SystemInfoStream` against each entry's range. The MSV array covers entries spanning Windows 7 (build 7600) through Windows 11 26H1 (build 28000+). WDigest, Kerberos, DPAPI, and LSA secrets each contain multiple build-specific entries, including separate legacy and 24H2+/26H1 layouts where needed. TSPKG templates remain optional.
 
 For MSV, multiple overlapping template entries are allowed for the same build range. KvcForensic evaluates all matching candidates and selects the best-scoring layout against live dump memory. Even when `parser_support = true`, a heuristic shift/fallback path can be activated when template offsets do not validate well on the analyzed dump. In that case, the GUI shows a red warning status (`Heuristic mode` / `Heuristic fallback used`) to indicate reduced confidence.
 
@@ -153,7 +153,7 @@ Both formats are handled transparently during extraction.
 
 Kerberos stores sessions in an `RTL_AVL_TABLE`. The tree is traversed with an iterative DFS using an explicit `std::vector` stack rather than recursion, eliminating any risk of stack overflow on deep or corrupted trees. Visited nodes are tracked in a `std::unordered_set<uint64_t>`. For each node, the `OrderedPointer` field at node+32 yields the session pointer. The LUID is read at session+64; if that value does not match any known session LUID, a fallback probe over offsets {56, 48, 72, 40, 32} is performed.
 
-Kerberos ticket lists (three lists per session at offsets +280, +304, +328 in `KIWI_KERBEROS_LOGON_SESSION_24H2`) are extracted per session. Ticket metadata includes service name, target name, client name, flags, encryption type, kvno, and raw ticket bytes.
+Kerberos ticket lists are extracted per session using offsets selected from the active `kerberos_x64` template. On the 24H2+ layout this corresponds to three lists at offsets `+280`, `+304`, and `+328` in `KIWI_KERBEROS_LOGON_SESSION_24H2`. Ticket metadata includes service name, target name, client name, flags, encryption type, kvno, and raw ticket bytes.
 
 ### WDigest list walk
 
@@ -278,7 +278,7 @@ When the parser must use heuristic layout recovery (template mismatch or runtime
 
 ## Supported builds
 
-Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) requires both a session template with `parser_support = true` and an LSA secrets key template. That path is fully validated on builds `26100+`; a legacy variant is also wired for `17763-26099`, with current validation anchored on Windows 10 22H2 build `19045`.
+Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) requires both a session template with `parser_support = true` and an LSA secrets key template. That path is fully validated on builds `26100+`; a legacy variant is also wired for `17763-26099`, with current validation anchored on Windows 10 22H2 build `19045` and ticket-bearing Windows 11 24H2 build `26100` dumps.
 
 | Windows version         | Build range   | Credential extraction    |
 |-------------------------|---------------|--------------------------|
@@ -290,7 +290,7 @@ Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) req
 | Windows 11 23H2 / 22H2 / 21H2, Windows 10 1809-22H2 | 17763-26099 | Legacy path, limited validation |
 | Windows 10 1803 and earlier, 8.x, 7 | below 17763 | Template only / experimental |
 
-Template entries for all builds from Windows 7 (7600) through Windows 11 21H2 are present in `KvcForensic.json` to allow signature location and session list traversal. Credential decryption is unavailable for these builds because the LSA key template does not cover them. Output for unsupported builds will contain session metadata (LUID, username, domain, SID) where the layout detection heuristic succeeds, but all credential fields will be empty.
+Template entries for session discovery span Windows 7 (7600) through Windows 11 26H1. Legacy LSA decryption is wired for builds `17763-26099`; builds below `17763` remain template-only / experimental. Output for unsupported builds will contain session metadata (LUID, username, domain, SID) where the layout detection heuristic succeeds, but credential fields will usually remain empty.
 
 Primary development and validation target is Windows 11 26H1 (build 28000), Windows 11 25H2 (build 26200), Windows 11 24H2 (build 26100), and the legacy Windows 10 22H2 checkpoint (build 19045).
 

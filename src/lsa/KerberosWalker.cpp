@@ -116,6 +116,17 @@ void KerberosWalker::WalkAvlNode(
                         cred.password     = password;
                         cred.password_hex = password_hex;
                         WalkKerberosTickets(session_ptr, cred);
+                        if (cred.username.empty() && (!cred.password.empty() || !cred.password_hex.empty() || !cred.tickets.empty())) {
+                            cred.username = s.username;
+                        }
+                        if (cred.domainname.empty() && (!cred.password.empty() || !cred.password_hex.empty() || !cred.tickets.empty())) {
+                            cred.domainname = s.domainname;
+                        }
+                        if (cred.username.empty() && cred.domainname.empty() &&
+                            cred.password.empty() && cred.password_hex.empty() &&
+                            cred.tickets.empty()) {
+                            break;
+                        }
                         s.kerberos_credentials.push_back(cred);
                         break;
                     }

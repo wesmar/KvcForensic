@@ -2,6 +2,7 @@
 
 #include "lsa/LsaReaderUtils.h"
 
+#include <algorithm>
 #include <cstring>
 #include <unordered_set>
 #include <vector>
@@ -151,6 +152,13 @@ constexpr std::size_t kDecB_DpapiStart  = 122;
 constexpr std::size_t kDecB_DpapiEnd    = 142;
 constexpr std::uint32_t kMaxCredentialsListNodes = 4096;
 constexpr std::uint32_t kMaxPrimaryCredentialsNodes = 4096;
+
+bool IsAllZeroBytes(const std::vector<std::byte>& bytes) {
+    return !bytes.empty() &&
+           std::all_of(bytes.begin(), bytes.end(), [](const std::byte b) {
+               return b == std::byte{0};
+           });
+}
 
 } // namespace
 
@@ -362,6 +370,9 @@ security::MsvCredential MsvWalker::DecryptPrimaryCredential(
                                               decrypted.begin() + kDecLegacyShaEnd);
                     }
                 }
+                if (IsAllZeroBytes(cred.lm_hash)) {
+                    cred.lm_hash.clear();
+                }
                 return cred;
             }
 
@@ -391,6 +402,9 @@ security::MsvCredential MsvWalker::DecryptPrimaryCredential(
                     if (is_dpapi && decrypted.size() >= kDecB_DpapiEnd)
                         cred.dpapi.assign(decrypted.begin() + kDecB_DpapiStart,
                                           decrypted.begin() + kDecB_DpapiEnd);
+                }
+                if (IsAllZeroBytes(cred.lm_hash)) {
+                    cred.lm_hash.clear();
                 }
                 return cred;
             }
