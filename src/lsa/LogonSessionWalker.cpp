@@ -85,13 +85,13 @@ int LogonSessionWalker::ScoreSessionFieldLayout(
 
     for (std::uint32_t i = 0; i < session_count && i < 4; ++i) {
         const std::uint64_t skip_ptr = ptr_entry_loc + static_cast<std::uint64_t>(i) * 16;
-        std::uint64_t list_head = 0;
-        if (!vmem_.ReadStruct(skip_ptr, &list_head) || list_head == 0 || !IsReadablePointer(list_head, 16)) {
+        std::uint64_t current = 0;
+        if (!vmem_.ReadStruct(skip_ptr, &current) || current == 0 || !IsReadablePointer(current, 16)) {
             continue;
         }
 
         std::unordered_set<std::uint64_t> visited;
-        std::uint64_t current = list_head;
+        visited.insert(skip_ptr);
         for (std::uint32_t n = 0; n < 8; ++n) {
             if (current == 0 || !visited.insert(current).second || !IsReadablePointer(current, 16)) break;
             ++samples;
@@ -115,7 +115,7 @@ int LogonSessionWalker::ScoreSessionFieldLayout(
             }
 
             std::uint64_t next = 0;
-            if (!vmem_.ReadStruct(current, &next) || next == list_head) break;
+            if (!vmem_.ReadStruct(current, &next) || next == skip_ptr) break;
             current = next;
         }
     }
@@ -273,7 +273,6 @@ std::uint64_t LogonSessionWalker::FindMsvLogonList() {
             ptr_entry_loc += additional_offset;
     }
 
-    if (!IsReadablePointer(ptr_entry_loc, 8)) return 0;
     ptr_entry_loc_ = ptr_entry_loc;
 
     if (msv_template_->offset2 != 0) {
@@ -295,7 +294,7 @@ std::uint64_t LogonSessionWalker::FindMsvLogonList() {
 
     std::uint64_t target_list = 0;
     if (!vmem_.ReadStruct(ptr_entry_loc, &target_list)) return 0;
-    if (target_list == 0 || !IsReadablePointer(target_list, 16)) return 0;
+    if (target_list == 0) return 0;
     return target_list;
 }
 
@@ -346,38 +345,35 @@ std::vector<LogonSession> LogonSessionWalker::EnumerateSessionsWithLayout(const 
     for (std::uint32_t i = 0; i < session_count_ && sessions.size() < kMaxSessionsOverall; ++i) {
         const std::uint64_t skip_ptr = ptr_entry_loc_ + static_cast<std::uint64_t>(i) * 16;
 
-        std::uint64_t list_head = 0;
-        if (!vmem_.ReadStruct(skip_ptr, &list_head) || list_head == 0 || !IsReadablePointer(list_head, 16)) continue;
-
         std::uint64_t current = 0;
-        if (!vmem_.ReadStruct(list_head, &current) || !IsReadablePointer(current, 16)) continue;
-        if (current == list_head) continue;
+        if (!vmem_.ReadStruct(skip_ptr, &current) || current == 0 || !IsReadablePointer(current, 16)) continue;
+        if (current == skip_ptr) continue;
 
         std::unordered_set<std::uint64_t> visited;
-        std::uint64_t walk_start = list_head;
+        visited.insert(skip_ptr);
         std::uint32_t safety = 0;
 
         do {
-            if (walk_start == 0 || !IsReadablePointer(walk_start, 16)) break;
-            if (!visited.insert(walk_start).second) break;
+            if (current == 0 || !IsReadablePointer(current, 16)) break;
+            if (!visited.insert(current).second) break;
             if (++safety > kMaxWalkNodesPerList) break;
 
             LogonSession session;
-            session.address = walk_start;
+            session.address = current;
 
             std::uint64_t luid = 0;
-            if (vmem_.ReadStruct(walk_start + layout.luid_offset, &luid) && IsLikelyLuid(luid))
+            if (vmem_.ReadStruct(current + layout.luid_offset, &luid) && IsLikelyLuid(luid))
                 session.authentication_id = luid;
 
-            session.username   = ReadUnicodeString(vmem_, walk_start + layout.username_offset);
-            session.domainname = ReadUnicodeString(vmem_, walk_start + layout.domain_offset);
+            session.username   = ReadUnicodeString(vmem_, current + layout.username_offset);
+            session.domainname = ReadUnicodeString(vmem_, current + layout.domain_offset);
 
             std::uint64_t psid_ptr = 0;
-            if (vmem_.ReadStruct(walk_start + layout.sid_ptr_offset, &psid_ptr) && psid_ptr != 0 && IsReadablePointer(psid_ptr, 8))
+            if (vmem_.ReadStruct(current + layout.sid_ptr_offset, &psid_ptr) && psid_ptr != 0 && IsReadablePointer(psid_ptr, 8))
                 session.sid = ReadSid(vmem_, psid_ptr);
 
             std::uint64_t creds_ptr = 0;
-            if (vmem_.ReadStruct(walk_start + layout.credentials_ptr_offset, &creds_ptr) &&
+            if (vmem_.ReadStruct(current + layout.credentials_ptr_offset, &creds_ptr) &&
                 (creds_ptr == 0 || IsReadablePointer(creds_ptr, 16))) {
                 session.credentials_list_ptr = creds_ptr;
             }
@@ -386,9 +382,9 @@ std::vector<LogonSession> LogonSessionWalker::EnumerateSessionsWithLayout(const 
                 sessions.push_back(std::move(session));
 
             std::uint64_t next = 0;
-            if (!vmem_.ReadStruct(walk_start, &next)) break;
-            walk_start = next;
-        } while (walk_start != 0 && walk_start != list_head && sessions.size() < kMaxSessionsOverall);
+            if (!vmem_.ReadStruct(current, &next)) break;
+            current = next;
+        } while (current != 0 && current != skip_ptr && sessions.size() < kMaxSessionsOverall);
     }
     return sessions;
 }

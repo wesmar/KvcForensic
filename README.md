@@ -3,7 +3,7 @@
 ![KvcForensic](images/KvcForensic.jpg)
 
 Windows LSA credential parser for `lsass.dmp` minidumps.
-Active support targets: **Windows 11 24H2 / 25H2 / 26H1** (builds 26100+) and **Windows Server 2025**. A legacy decryption path is also implemented for **Windows 10 22H2** and related pre-24H2 builds; current in-repo validation covers **Windows 10 22H2 build 19045** and ticket-bearing **Windows 11 24H2 build 26100** dumps.
+Active support targets: **Windows 10 1703-22H2** and **Windows 11 21H2 / 22H2 / 24H2 / 25H2 / 26H1**, plus **Windows Server 2025**. Current in-repo validation covers legacy Win10 builds `15063/16299/17134/17763`, Win10 `19045`, Win11 `22000/22621`, and ticket-bearing Win11 `26100/26200/28000` dumps.
 
 Built entirely on pure Win32 API. No runtime dependencies beyond the OS and the BCrypt primitive. No DbgHelp, no third-party libraries, no framework.
 
@@ -107,11 +107,11 @@ Each template entry defines:
 - Offsets relative to the signature match
 - `parser_support` flag (MSV only): whether full session field parsing is implemented for that build range
 
-Templates are selected at runtime by matching the build number from `SystemInfoStream` against each entry's range. The MSV array covers entries spanning Windows 7 (build 7600) through Windows 11 26H1 (build 28000+). WDigest, Kerberos, DPAPI, and LSA secrets each contain multiple build-specific entries, including separate legacy and 24H2+/26H1 layouts where needed. TSPKG templates remain optional.
+Templates are selected at runtime by matching the build number from `SystemInfoStream` against each entry's range. The MSV array covers entries spanning Windows 7 (build 7600) through Windows 11 26H1 (build 28000+). WDigest, Kerberos, DPAPI, and LSA secrets each contain multiple build-specific entries, including separate `1703/1709`, `1803/1809`, `1903-22H2`, `21H2/22H2`, `24H2/25H2`, and `26H1` layouts where needed. TSPKG templates remain optional.
 
 For MSV, multiple overlapping template entries are allowed for the same build range. KvcForensic evaluates all matching candidates and selects the best-scoring layout against live dump memory. Even when `parser_support = true`, a heuristic shift/fallback path can be activated when template offsets do not validate well on the analyzed dump. In that case, the GUI shows a red warning status (`Heuristic mode` / `Heuristic fallback used`) to indicate reduced confidence.
 
-LSA key material decryption is available for builds covered by the `lsa_secrets_x64` template. The primary fully-validated path is `26100+`, and the legacy path (`17763-26099`) is currently validated in-repo on Windows 10 22H2 build `19045`.
+LSA key material decryption is available for builds covered by the `lsa_secrets_x64` template. The modern path is fully validated on `26100+`, and the legacy path is now validated in-repo across Windows 10 `1703-22H2` and Windows 11 `21H2/22H2` checkpoints.
 
 ### MSV credential walk
 
@@ -278,7 +278,7 @@ When the parser must use heuristic layout recovery (template mismatch or runtime
 
 ## Supported builds
 
-Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) requires both a session template with `parser_support = true` and an LSA secrets key template. That path is fully validated on builds `26100+`; a legacy variant is also wired for `17763-26099`, with current validation anchored on Windows 10 22H2 build `19045` and ticket-bearing Windows 11 24H2 build `26100` dumps.
+Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) requires both a session template with `parser_support = true` and an LSA secrets key template. That path is fully validated on builds `26100+`; the legacy variant is now also validated in-repo on Windows 10 `1703-22H2` checkpoints and Windows 11 `21H2/22H2`, with ticket-bearing validation anchored on Windows 11 `24H2/25H2/26H1`.
 
 | Windows version         | Build range   | Credential extraction    |
 |-------------------------|---------------|--------------------------|
@@ -286,13 +286,15 @@ Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) req
 | Windows 11 25H2         | 26200-27999   | Full                     |
 | Windows 11 24H2         | 26100-26199   | Full                     |
 | Windows Server 2025     | 26100+        | Full                     |
-| Windows 10 22H2         | 19045         | Legacy core decrypt      |
-| Windows 11 23H2 / 22H2 / 21H2, Windows 10 1809-22H2 | 17763-26099 | Legacy path, limited validation |
-| Windows 10 1803 and earlier, 8.x, 7 | below 17763 | Template only / experimental |
+| Windows 11 22H2 / 21H2 | 22000-22621   | Legacy validated         |
+| Windows 10 22H2 / 21H2 / 21H1 / 20H2 / 2004 / 1909 / 1903 | 18362-19045 | Legacy validated |
+| Windows 10 1809 / 1803 | 17134-17763   | Legacy validated         |
+| Windows 10 1709 / 1703 | 15063-16299   | Legacy validated         |
+| Windows 10 1607 and earlier, 8.x, 7 | below 15063 | Template only / experimental |
 
-Template entries for session discovery span Windows 7 (7600) through Windows 11 26H1. Legacy LSA decryption is wired for builds `17763-26099`; builds below `17763` remain template-only / experimental. Output for unsupported builds will contain session metadata (LUID, username, domain, SID) where the layout detection heuristic succeeds, but credential fields will usually remain empty.
+Template entries for session discovery span Windows 7 (7600) through Windows 11 26H1. Legacy LSA decryption is now validated from build `15063` upward; builds below `15063` remain template-only / experimental. Output for unsupported builds will contain session metadata (LUID, username, domain, SID) where the layout detection heuristic succeeds, but credential fields will usually remain empty.
 
-Primary development and validation target is Windows 11 26H1 (build 28000), Windows 11 25H2 (build 26200), Windows 11 24H2 (build 26100), and the legacy Windows 10 22H2 checkpoint (build 19045).
+Primary development and validation targets are Windows 11 26H1 (build 28000), Windows 11 25H2 (build 26200), Windows 11 24H2 (build 26100), Windows 11 21H2/22H2, and the legacy Windows 10 checkpoints spanning 1703 through 22H2.
 
 ---
 

@@ -959,7 +959,7 @@ bool ValidateDpapiSpecs(const std::vector<DpapiTemplateSpec>& specs) {
 }
 
 bool ValidateLsaSecretsSpecs(const std::vector<LsaSecretsTemplateSpec>& specs) {
-    if (!ValidateBuildRanges(specs, false)) {
+    if (!ValidateBuildRanges(specs, true)) {
         return false;
     }
     for (const auto& spec : specs) {
@@ -1103,6 +1103,16 @@ const DpapiTemplateSpec* SelectDpapiTemplateX64(const std::uint32_t build_number
 
 const LsaSecretsTemplateSpec* SelectLsaSecretsTemplateX64(const std::uint32_t build_number) {
     return SelectByBuild(g_LsaSecretsX64Templates, build_number);
+}
+
+std::vector<const LsaSecretsTemplateSpec*> SelectLsaSecretsTemplateCandidatesX64(const std::uint32_t build_number) {
+    std::vector<const LsaSecretsTemplateSpec*> out;
+    for (const auto& spec : g_LsaSecretsX64Templates) {
+        if (build_number >= spec.min_build && build_number <= spec.max_build) {
+            out.push_back(&spec);
+        }
+    }
+    return out;
 }
 
 const TspkgTemplateSpec* SelectTspkgTemplateX64(const std::uint32_t build_number) {

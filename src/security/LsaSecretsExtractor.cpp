@@ -79,6 +79,39 @@ const minidump::ModuleInfo* LsaSecretsExtractor::FindModule(const std::wstring& 
     return nullptr;
 }
 
+std::vector<std::uint64_t> FindSignatureMatches(
+    const core::VirtualMemory& vmem,
+    const minidump::MinidumpMetadata& metadata,
+    const minidump::ModuleInfo& module,
+    const std::vector<std::uint8_t>& signature) {
+    std::vector<std::uint64_t> matches;
+    if (signature.empty()) {
+        return matches;
+    }
+
+    for (const auto& range : metadata.memory_ranges) {
+        std::uint64_t start = std::max(range.start_vva, static_cast<std::uint64_t>(module.base_address));
+        std::uint64_t end = std::min(range.start_vva + range.size, static_cast<std::uint64_t>(module.base_address + module.size));
+
+        if (start >= end || (end - start) < signature.size()) {
+            continue;
+        }
+
+        std::vector<std::byte> chunk(end - start);
+        if (!vmem.ReadBytes(start, chunk.size(), chunk)) {
+            continue;
+        }
+
+        for (std::size_t i = 0; i <= chunk.size() - signature.size(); ++i) {
+            if (std::memcmp(chunk.data() + i, signature.data(), signature.size()) == 0) {
+                matches.push_back(start + i);
+            }
+        }
+    }
+
+    return matches;
+}
+
 std::uint64_t LsaSecretsExtractor::FindSignature() {
     if (template_ == nullptr || template_->signature.empty()) {
         return 0;
@@ -86,26 +119,9 @@ std::uint64_t LsaSecretsExtractor::FindSignature() {
     
     const minidump::ModuleInfo* lsasrv = FindModule(L"lsasrv.dll");
     if (!lsasrv) return 0;
-    
-    // Search in memory ranges that overlap with lsasrv.dll
-    for (const auto& range : metadata_.memory_ranges) {
-        std::uint64_t start = std::max(range.start_vva, static_cast<std::uint64_t>(lsasrv->base_address));
-        std::uint64_t end = std::min(range.start_vva + range.size, static_cast<std::uint64_t>(lsasrv->base_address + lsasrv->size));
-        
-        if (start >= end) continue;
-        
-        std::vector<std::byte> chunk(end - start);
-        if (!vmem_.ReadBytes(start, chunk.size(), chunk)) continue;
-        
-        // Search for signature
-        for (std::size_t i = 0; i <= chunk.size() - template_->signature.size(); ++i) {
-            if (std::memcmp(chunk.data() + i, template_->signature.data(), template_->signature.size()) == 0) {
-                return start + i;
-            }
-        }
-    }
-    
-    return 0;
+
+    const auto matches = FindSignatureMatches(vmem_, metadata_, *lsasrv, template_->signature);
+    return matches.empty() ? 0 : matches.front();
 }
 
 std::uint64_t LsaSecretsExtractor::GetPtrWithOffset(std::uint64_t pos) {
@@ -193,31 +209,54 @@ bool LsaSecretsExtractor::Initialize(const std::uint32_t build_number) {
     if (initialized_) return true;
     last_error_.clear();
 
-    template_ = lsa::templates::SelectLsaSecretsTemplateX64(build_number);
-    if (template_ == nullptr || template_->signature.empty()) {
+    const auto candidates = lsa::templates::SelectLsaSecretsTemplateCandidatesX64(build_number);
+    if (candidates.empty()) {
         last_error_ = L"No LSA secrets template for build " + std::to_wstring(build_number) + L".";
         return false;
     }
-    
-    std::uint64_t sig_pos = FindSignature();
-    if (sig_pos == 0) {
-        last_error_ = L"LSA secrets signature not found in lsasrv.dll memory ranges.";
-        return false;
-    }
-    
-    if (!ExtractIv(sig_pos)) {
-        last_error_ = L"Failed to extract LSA IV.";
-        return false;
-    }
-    if (!ExtractAesKey(sig_pos)) {
-        last_error_ = L"Failed to extract LSA AES key.";
-        return false;
-    }
-    ExtractDesKey(sig_pos); // Optional - some dumps may not have DES key
 
-    initialized_ = true;
-    last_error_.clear();
-    return true;
+    const minidump::ModuleInfo* lsasrv = FindModule(L"lsasrv.dll");
+    if (!lsasrv) {
+        last_error_ = L"lsasrv.dll not present in dump module list.";
+        return false;
+    }
+
+    std::wstring last_attempt_error = L"LSA secrets signature not found in lsasrv.dll memory ranges.";
+    for (const auto* candidate : candidates) {
+        if (candidate == nullptr || candidate->signature.empty()) {
+            continue;
+        }
+
+        const auto matches = FindSignatureMatches(vmem_, metadata_, *lsasrv, candidate->signature);
+        if (matches.empty()) {
+            continue;
+        }
+
+        for (const auto sig_pos : matches) {
+            template_ = candidate;
+            aes_key_.clear();
+            des_key_.clear();
+            iv_.clear();
+
+            if (!ExtractIv(sig_pos)) {
+                last_attempt_error = L"Failed to extract LSA IV.";
+                continue;
+            }
+            if (!ExtractAesKey(sig_pos)) {
+                last_attempt_error = L"Failed to extract LSA AES key.";
+                continue;
+            }
+            ExtractDesKey(sig_pos); // Optional - some dumps may not have DES key
+
+            initialized_ = true;
+            last_error_.clear();
+            return true;
+        }
+    }
+
+    template_ = nullptr;
+    last_error_ = last_attempt_error;
+    return false;
 }
 
 std::vector<std::byte> LsaSecretsExtractor::Decrypt(std::span<const std::byte> encrypted) {

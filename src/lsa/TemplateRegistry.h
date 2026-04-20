@@ -123,6 +123,7 @@ const WdigestTemplateSpec* SelectWdigestTemplateX64(std::uint32_t build_number);
 const KerberosTemplateSpec* SelectKerberosTemplateX64(std::uint32_t build_number);
 const DpapiTemplateSpec* SelectDpapiTemplateX64(std::uint32_t build_number);
 const LsaSecretsTemplateSpec* SelectLsaSecretsTemplateX64(std::uint32_t build_number);
+std::vector<const LsaSecretsTemplateSpec*> SelectLsaSecretsTemplateCandidatesX64(std::uint32_t build_number);
 const TspkgTemplateSpec* SelectTspkgTemplateX64(std::uint32_t build_number);
 
 } // namespace KvcForensic::lsa::templates
