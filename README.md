@@ -1,3 +1,11 @@
+## 📋 Changelog
+
+**[13.05.2026]**
+
+<details>
+<summary><strong>🔪 KvcForensic runs natively on Linux and will soon be available on Android and OS X as well</strong>
+
+
 # KvcForensic
 
 ![KvcForensic](images/KvcForensic.jpg)
