@@ -3,9 +3,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-jobs="${JOBS:-$(nproc 2>/dev/null || echo 1)}"
-out="KvcForensic"
-
 sources=(
   src/main.cpp
   src/core/crypto_backend.cpp
@@ -36,18 +33,27 @@ clean_artifacts() {
 
 case "${1:-build}" in
   build)
+    mkdir -p bin
     clean_artifacts
+
+    echo "  [1/2] dynamic..."
     g++ -std=c++23 -O2 -Wall -Wextra -Wpedantic -Wconversion -Isrc \
-      "${sources[@]}" -o "$out" -lcrypto
+      "${sources[@]}" -o bin/KvcForensic -lcrypto
+
+    echo "  [2/2] static..."
+    g++ -std=c++23 -O2 -Wall -Wextra -Wpedantic -Wconversion -Isrc \
+      "${sources[@]}" -o bin/KvcForensic_static \
+      -static -lcrypto -lz -lzstd -ljitterentropy -lpthread -ldl
+
     clean_artifacts
+    ls -lh bin/KvcForensic bin/KvcForensic_static
     ;;
   clean)
     clean_artifacts
-    rm -f "$out"
+    rm -f bin/KvcForensic bin/KvcForensic_static
     ;;
   *)
     echo "usage: ./build.sh [build|clean]" >&2
     exit 2
     ;;
 esac
-

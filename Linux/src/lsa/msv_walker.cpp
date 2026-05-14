@@ -18,6 +18,7 @@ constexpr std::size_t kPrimaryEncLenOffset = 24;
 constexpr std::size_t kPrimaryEncMaxLenOffset = 26;
 constexpr std::size_t kPrimaryEncBufOffset = 32;
 
+constexpr std::size_t kCredManSetListCountOffset = 16;
 constexpr std::size_t kCredManSetList1Offset = 24;
 constexpr std::size_t kCredManStarterSentinelOffset = 8;
 constexpr std::size_t kCredManEntryFlinkOffset = 56;
@@ -101,47 +102,55 @@ void MsvWalker::extract_credman(LogonSession& session) const {
     if (!tmpl_ || tmpl_->session_credman_ptr_offset == 0) return;
     auto cred_mgr = vmem_.read_u64(session.address + tmpl_->session_credman_ptr_offset);
     if (!cred_mgr || *cred_mgr == 0) return;
-    auto list1 = vmem_.read_u64(*cred_mgr + kCredManSetList1Offset);
-    if (!list1 || *list1 == 0) return;
 
-    const std::uint64_t sentinel = *list1 + kCredManStarterSentinelOffset;
-    auto first = vmem_.read_u64(sentinel);
-    if (!first || *first == sentinel) return;
-    std::uint64_t current = *first;
+    // cred_mgr+16: count of credential set lists
+    // cred_mgr+24, +32, ... : pointers to KIWI_CREDMAN_LIST_STARTER (each 8 bytes apart)
+    const auto list_count_opt = vmem_.read_u64(*cred_mgr + kCredManSetListCountOffset);
+    const std::uint64_t list_count = (list_count_opt && *list_count_opt <= 16) ? *list_count_opt : 1;
 
-    int safety = 0;
-    while (current != sentinel && safety++ < 255) {
-        if (!vmem_.va_to_rva(current, kCredManEntryFlinkOffset + 8)) break;
-        if (current < kCredManEntryFlinkOffset) break;
-        const std::uint64_t entry_start = current - kCredManEntryFlinkOffset;
-        if (!vmem_.va_to_rva(entry_start, 200)) break;
+    for (std::uint64_t li = 0; li < list_count; ++li) {
+        const auto lptr = vmem_.read_u64(*cred_mgr + kCredManSetList1Offset + li * 8);
+        if (!lptr || *lptr == 0) continue;
 
-        auto cb_enc = vmem_.read_u32(entry_start + kCredManEntryCbEncPwdOffset).value_or(0);
-        auto enc_ptr = vmem_.read_u64(entry_start + kCredManEntryEncPwdPtrOffset).value_or(0);
+        const std::uint64_t sentinel = *lptr + kCredManStarterSentinelOffset;
+        const auto first = vmem_.read_u64(sentinel);
+        if (!first || *first == sentinel) continue;
+        std::uint64_t current = *first;
 
-        const std::string user = vmem_.read_unicode_string(entry_start + kCredManEntryUserOffset);
-        const std::string dom = vmem_.read_unicode_string(entry_start + kCredManEntryServer2Offset);
+        int safety = 0;
+        while (current != sentinel && safety++ < 255) {
+            if (!vmem_.va_to_rva(current, 8)) break;
+            if (current < kCredManEntryFlinkOffset) break;
+            const std::uint64_t entry_start = current - kCredManEntryFlinkOffset;
+            if (!vmem_.va_to_rva(entry_start, 16)) break;
 
-        std::string password, password_hex;
-        if (cb_enc > 0 && enc_ptr != 0 && extractor_ && extractor_->is_initialized()) {
-            std::vector<std::byte> enc(cb_enc);
-            if (vmem_.read_bytes(enc_ptr, cb_enc, enc)) {
-                auto dec = extractor_->decrypt(enc);
-                decode_password_candidate(dec, 0, password, password_hex);
+            auto cb_enc = vmem_.read_u32(entry_start + kCredManEntryCbEncPwdOffset).value_or(0);
+            auto enc_ptr = vmem_.read_u64(entry_start + kCredManEntryEncPwdPtrOffset).value_or(0);
+
+            const std::string user = vmem_.read_unicode_string(entry_start + kCredManEntryUserOffset);
+            const std::string dom = vmem_.read_unicode_string(entry_start + kCredManEntryServer2Offset);
+
+            std::string password, password_hex;
+            if (cb_enc > 0 && enc_ptr != 0 && extractor_ && extractor_->is_initialized()) {
+                std::vector<std::byte> enc(cb_enc);
+                if (vmem_.read_bytes(enc_ptr, cb_enc, enc)) {
+                    auto dec = extractor_->decrypt(enc);
+                    decode_password_candidate(dec, 0, password, password_hex);
+                }
             }
-        }
 
-        if (!user.empty() || !dom.empty() || !password.empty() || !password_hex.empty()) {
-            CredmanCredential c;
-            c.username = user; c.domainname = dom;
-            c.password = password; c.password_hex = password_hex;
-            session.credman_credentials.push_back(std::move(c));
-        }
+            if (!user.empty() || !dom.empty() || !password.empty() || !password_hex.empty()) {
+                CredmanCredential c;
+                c.username = user; c.domainname = dom;
+                c.password = password; c.password_hex = password_hex;
+                session.credman_credentials.push_back(std::move(c));
+            }
 
-        auto next = vmem_.read_u64(current);
-        if (!next) break;
-        if (*next != sentinel && *next != 0 && !vmem_.va_to_rva(*next, 8)) break;
-        current = *next;
+            auto next = vmem_.read_u64(current);
+            if (!next) break;
+            if (*next != sentinel && *next != 0 && !vmem_.va_to_rva(*next, 8)) break;
+            current = *next;
+        }
     }
 }
 

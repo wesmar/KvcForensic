@@ -132,6 +132,12 @@ std::string ReportBuilder::build_text(const AnalysisResult& r, const ReportOptio
                     << " sha1=" << secret_text(c.sha1_masterkey, reveal)
                     << " bytes=" << c.masterkey.size() << '\n';
             }
+            for (const auto& c : s.credman_credentials) {
+                out << "  credman user='" << c.username
+                    << "' server='" << c.domainname << "'"
+                    << " pwd='" << secret_text(c.password, reveal) << "'"
+                    << " hex=" << secret_text(c.password_hex, reveal) << '\n';
+            }
         }
     }
 
@@ -272,6 +278,15 @@ std::string ReportBuilder::build_json(const AnalysisResult& r, const ReportOptio
             out << (j ? "," : "") << "{\"guid\":\"" << json_escape(c.key_guid)
                 << "\",\"sha1\":" << text_or_null(c.sha1_masterkey)
                 << ",\"bytes\":" << c.masterkey.size() << "}";
+        }
+        out << "],\n";
+        out << "      \"credman\": [";
+        for (std::size_t j = 0; j < s.credman_credentials.size(); ++j) {
+            const auto& c = s.credman_credentials[j];
+            out << (j ? "," : "") << "{\"user\":\"" << json_escape(c.username)
+                << "\",\"server\":\"" << json_escape(c.domainname)
+                << "\",\"password\":" << text_or_null(c.password)
+                << ",\"password_hex\":" << text_or_null(c.password_hex) << "}";
         }
         out << "]\n";
         out << "    }" << (i + 1 == r.sessions.size() ? "" : ",") << "\n";

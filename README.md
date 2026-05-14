@@ -1,10 +1,68 @@
 ## 📋 Changelog
 
+**[14.05.2026]**
+
+<details>
+<summary><strong>🐧 Linux / WSL build — two binaries, static variant has no runtime dependencies</strong></summary>
+
+<br>
+
+The Linux port now ships as a standalone CLI, built and tested under **WSL / Ubuntu 26.04**.
+Crypto is backed by **OpenSSL libcrypto** instead of BCrypt — output is byte-for-byte identical
+to the Windows build (same NT/SHA1 hashes, same DPAPI master-key GUIDs).
+
+`build.sh` produces two binaries in `bin/`:
+
+| Binary                 | Size     | Notes                                                      |
+|------------------------|----------|------------------------------------------------------------|
+| `KvcForensic`          | ~337 KB  | Dynamically linked — requires `libcrypto` at runtime       |
+| `KvcForensic_static`   | ~9.4 MB  | Fully static — no runtime dependencies, drop anywhere      |
+
+```bash
+# Install dependencies
+sudo apt install build-essential libssl-dev                          # dynamic
+sudo apt install zlib1g-dev libzstd-dev libjitterentropy-dev        # also needed for static
+
+# Build both binaries in one step
+./build.sh
+
+# Clean
+./build.sh clean
+```
+
+CMake is also supported (dynamic only):
+
+```bash
+cmake -S . -B build && cmake --build build -j
+```
+
+Requires **gcc 13+** (C++23). `KvcForensic.json` must be co-located with the binary or passed
+via `--templates`. Resolution order: `--templates` arg → `$KVC_TEMPLATES` env → alongside
+binary → `resources/` subdir → `/etc/kvc/` → `/usr/share/kvc/`.
+
+```bash
+./bin/KvcForensic_static --analyze-dump \
+    --input lsass.dmp \
+    --output result.txt \
+    --templates resources/KvcForensic.json \
+    --format both --full
+```
+
+</details>
+
 **[13.05.2026]**
 
 <details>
-<summary><strong>🔪 KvcForensic runs natively on Linux and will soon be available on Android and OS X as well</strong>
+<summary><strong>🔪 KvcForensic runs natively on Linux and will soon be available on Android and OS X as well</strong></summary>
 
+Linux port of the KvcForensic engine: minidump parser, VA→RVA resolver, module slicing,
+signature scanner, JSON template registry and full credential extraction pipeline
+(MSV, WDigest, Kerberos, DPAPI, TSPKG). Crypto backed by OpenSSL `libcrypto`. All output
+matches the Windows build 1:1.
+
+</details>
+
+---
 
 # KvcForensic
 
@@ -288,17 +346,17 @@ When the parser must use heuristic layout recovery (template mismatch or runtime
 
 Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) requires both a session template with `parser_support = true` and an LSA secrets key template. That path is fully validated on builds `26100+`; the legacy variant is now also validated in-repo on Windows 10 `1703-22H2` checkpoints and Windows 11 `21H2/22H2`, with ticket-bearing validation anchored on Windows 11 `24H2/25H2/26H1`.
 
-| Windows version         | Build range   | Credential extraction    |
-|-------------------------|---------------|--------------------------|
-| Windows 11 26H1         | 28000+        | Full                     |
-| Windows 11 25H2         | 26200-27999   | Full                     |
-| Windows 11 24H2         | 26100-26199   | Full                     |
-| Windows Server 2025     | 26100+        | Full                     |
-| Windows 11 22H2 / 21H2 | 22000-22621   | Legacy validated         |
-| Windows 10 22H2 / 21H2 / 21H1 / 20H2 / 2004 / 1909 / 1903 | 18362-19045 | Legacy validated |
-| Windows 10 1809 / 1803 | 17134-17763   | Legacy validated         |
-| Windows 10 1709 / 1703 | 15063-16299   | Legacy validated         |
-| Windows 10 1607 and earlier, 8.x, 7 | below 15063 | Template only / experimental |
+| Windows version                                                     | Build range   | Credential extraction        |
+|---------------------------------------------------------------------|---------------|------------------------------|
+| Windows 11 26H1                                                     | 28000+        | Full                         |
+| Windows 11 25H2                                                     | 26200-27999   | Full                         |
+| Windows 11 24H2                                                     | 26100-26199   | Full                         |
+| Windows Server 2025                                                 | 26100+        | Full                         |
+| Windows 11 22H2 / 21H2                                              | 22000-22621   | Legacy validated             |
+| Windows 10 22H2 / 21H2 / 21H1 / 20H2 / 2004 / 1909 / 1903         | 18362-19045   | Legacy validated             |
+| Windows 10 1809 / 1803                                              | 17134-17763   | Legacy validated             |
+| Windows 10 1709 / 1703                                              | 15063-16299   | Legacy validated             |
+| Windows 10 1607 and earlier, 8.x, 7                                 | below 15063   | Template only / experimental |
 
 Template entries for session discovery span Windows 7 (7600) through Windows 11 26H1. Legacy LSA decryption is now validated from build `15063` upward; builds below `15063` remain template-only / experimental. Output for unsupported builds will contain session metadata (LUID, username, domain, SID) where the layout detection heuristic succeeds, but credential fields will usually remain empty.
 
