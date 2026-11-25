@@ -330,7 +330,7 @@ This does not modify any kernel structures. It operates entirely in user mode an
 
 ## GUI
 
-Single binary with a native WinAPI window. Supports Mica backdrop (Windows 11 22H2+) with automatic light/dark mode following the system theme. No WinUI 3, no Qt, no MFC.
+Single binary with a native WinAPI window. Supports Mica backdrop (Windows 11 22H2+) with automatic light/dark mode following the system theme. The window position, size, maximized state, and splitter position are restored from `HKCU\Software\KVC\KvcForensic`. The process is Per-Monitor V2 DPI aware. No WinUI 3, no Qt, no MFC.
 
 The detail panel supports row selection with Ctrl+click and Shift+click. Selected rows can be copied to the clipboard with Ctrl+C or via the right-click context menu.
 

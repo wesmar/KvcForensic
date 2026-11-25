@@ -33,11 +33,17 @@
 namespace KvcForensic::ui {
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants (logical DIPs at 96 DPI; scaled via fonts_.S())
 // ---------------------------------------------------------------------------
-constexpr wchar_t kWndClass[]    = L"KvcForensicMainWnd";
-constexpr int     kSplitterW     = 5;
-constexpr int     kSplitterMin   = 120;
+constexpr wchar_t kWndClass[]     = L"KvcForensicMainWnd";
+constexpr int     kMenuBarDip     = 34;
+constexpr int     kStatusBarDip   = 28;
+constexpr int     kOuterPadDip    = 8;
+constexpr int     kSplitterDip    = 8;
+constexpr int     kSplitterMinDip = 160;
+constexpr wchar_t kSettingsKey[]  = L"Software\\KVC\\KvcForensic";
+constexpr wchar_t kWindowPlacementValue[] = L"WindowPlacement";
+constexpr wchar_t kSplitterDipValue[] = L"SplitterDip";
 
 // Status bar parts
 constexpr int SB_FILE  = 0;
@@ -59,6 +65,20 @@ bool AppUseDarkMode() {
         reinterpret_cast<LPBYTE>(&val), &sz);
     ::RegCloseKey(hk);
     return val == 0;
+}
+
+void SetUxThemePreferredAppMode(bool dark) {
+    if (HMODULE ux = ::GetModuleHandleW(L"uxtheme.dll")) {
+        using FnSetPreferredAppMode = int(WINAPI*)(int);
+        using FnFlushMenuThemes = void(WINAPI*)();
+        if (auto fn = reinterpret_cast<FnSetPreferredAppMode>(::GetProcAddress(ux, MAKEINTRESOURCEA(135)))) {
+            // 2 = ForceDark, 3 = ForceLight (keeps scrollbars synced with AppsUseLightTheme)
+            fn(dark ? 2 : 3);
+        }
+        if (auto flush = reinterpret_cast<FnFlushMenuThemes>(::GetProcAddress(ux, MAKEINTRESOURCEA(136)))) {
+            flush();
+        }
+    }
 }
 
 // Extract filename from full path (no filesystem dependency)
@@ -289,16 +309,20 @@ int KvcForensicWindow::GetNodeIndex(LPARAM p) {
 // Create / RunMessageLoop
 // ---------------------------------------------------------------------------
 bool KvcForensicWindow::Create(HINSTANCE instance, int nCmdShow) {
+    ::SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
     INITCOMMONCONTROLSEX icc{};
     icc.dwSize = sizeof(icc);
-    icc.dwICC  = ICC_TREEVIEW_CLASSES | ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES;
+    icc.dwICC  = ICC_TREEVIEW_CLASSES | ICC_LISTVIEW_CLASSES;
     ::InitCommonControlsEx(&icc);
 
     hInstance_ = instance;
 
+    const UINT sys_dpi = ::GetDpiForSystem();
+    const int icon_sm_sz = ::GetSystemMetricsForDpi(SM_CXSMICON, sys_dpi);
     icon_big_   = ::LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP_ICON));
     icon_small_ = reinterpret_cast<HICON>(::LoadImageW(instance,
-        MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR));
+        MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, icon_sm_sz, icon_sm_sz, LR_DEFAULTCOLOR));
 
     WNDCLASSEXW wc{};
     wc.cbSize        = sizeof(wc);
@@ -307,22 +331,27 @@ bool KvcForensicWindow::Create(HINSTANCE instance, int nCmdShow) {
     wc.hCursor       = ::LoadCursorW(nullptr, IDC_ARROW);
     wc.hIcon         = icon_big_   ? icon_big_   : ::LoadIconW(nullptr, IDI_APPLICATION);
     wc.hIconSm       = icon_small_ ? icon_small_ : ::LoadIconW(nullptr, IDI_APPLICATION);
-    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1);
+    wc.hbrBackground = nullptr;
     wc.lpszClassName = kWndClass;
     if (!::RegisterClassExW(&wc)) return false;
+
+    const int init_w = ::MulDiv(1120, static_cast<int>(sys_dpi), 96);
+    const int init_h = ::MulDiv(700, static_cast<int>(sys_dpi), 96);
 
     hwnd_ = ::CreateWindowExW(
         0, kWndClass, L"KvcForensic",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-        CW_USEDEFAULT, CW_USEDEFAULT, 1100, 680,
+        CW_USEDEFAULT, CW_USEDEFAULT, init_w, init_h,
         nullptr, nullptr, instance, this);
     if (!hwnd_) return false;
 
     ::SendMessageW(hwnd_, WM_SETICON, ICON_BIG,   reinterpret_cast<LPARAM>(wc.hIcon));
     ::SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(wc.hIconSm));
 
+    initial_show_cmd_ = nCmdShow;
+    RestoreWindowState();
     UpdateTheme();
-    ::ShowWindow(hwnd_, nCmdShow);
+    ::ShowWindow(hwnd_, initial_show_cmd_);
     ::UpdateWindow(hwnd_);
     return true;
 }
@@ -346,7 +375,7 @@ LRESULT CALLBACK KvcForensicWindow::WndProc(HWND hwnd, UINT msg, WPARAM wp, LPAR
     if (msg == WM_NCCREATE) {
         auto* cs = reinterpret_cast<CREATESTRUCTW*>(lp);
         self = static_cast<KvcForensicWindow*>(cs->lpCreateParams);
-        self->hwnd_ = hwnd;  // set early so CreateControls / SetMenu can use hwnd_
+        self->hwnd_ = hwnd;  // set early so CreateControls can use hwnd_
         ::SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     } else {
         self = reinterpret_cast<KvcForensicWindow*>(::GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -362,13 +391,83 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
         CreateControls(hwnd);
         return 0;
 
-    case WM_SIZE: {
-        int w = LOWORD(lp), h = HIWORD(lp);
-        // Clamp splitter to new width
-        splitter_x_ = std::clamp(splitter_x_, kSplitterMin, std::max(kSplitterMin, w - kSplitterMin));
-        LayoutControls(w, h);
+    case WM_DPICHANGED: {
+        const UINT new_dpi = HIWORD(wp);
+        const UINT old_dpi = dpi_ ? dpi_ : 96;
+        if (new_dpi != 0 && new_dpi != old_dpi) {
+            splitter_x_ = ::MulDiv(splitter_x_, static_cast<int>(new_dpi), static_cast<int>(old_dpi));
+            RecreateFonts(new_dpi);
+            if (menu_bar_) menu_bar_->Remeasure();
+            const MARGINS m{ fonts_.S(kOuterPadDip), fonts_.S(kOuterPadDip),
+                             fonts_.S(kMenuBarDip),  fonts_.S(kStatusBarDip) };
+            ApplyBackdrop(hwnd_, is_dark_mode_, m);
+        }
+        const auto* suggested = reinterpret_cast<const RECT*>(lp);
+        if (suggested) {
+            ::SetWindowPos(hwnd_, nullptr,
+                suggested->left, suggested->top,
+                suggested->right - suggested->left,
+                suggested->bottom - suggested->top,
+                SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        RECT rc{};
+        ::GetClientRect(hwnd_, &rc);
+        LayoutControls(rc.right, rc.bottom);
+        ::InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     }
+
+    case WM_SIZE: {
+        const int w = LOWORD(lp);
+        const int h = HIWORD(lp);
+        const int min_split = fonts_.S(kSplitterMinDip);
+        splitter_x_ = std::clamp(splitter_x_, min_split, std::max(min_split, w - min_split));
+        LayoutControls(w, h);
+        ::InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    }
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps{};
+        HDC hdc = ::BeginPaint(hwnd_, &ps);
+        PaintWindow(hdc);
+        ::EndPaint(hwnd_, &ps);
+        return 0;
+    }
+
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_MEASUREITEM: {
+        auto* mis = reinterpret_cast<MEASUREITEMSTRUCT*>(lp);
+        if (mis && mis->CtlType == ODT_MENU && menu_bar_) {
+            menu_bar_->Measure(*mis);
+            return TRUE;
+        }
+        break;
+    }
+
+    case WM_DRAWITEM: {
+        const auto* dis = reinterpret_cast<const DRAWITEMSTRUCT*>(lp);
+        if (dis && dis->CtlType == ODT_MENU && menu_bar_) {
+            menu_bar_->Draw(*dis);
+            return TRUE;
+        }
+        break;
+    }
+
+    case WM_SYSKEYDOWN:
+        if (wp == VK_F10 && menu_bar_) {
+            menu_bar_->Open(hwnd_, 0, true);
+            return 0;
+        }
+        break;
+
+    case WM_SYSCHAR:
+        if (menu_bar_ && menu_bar_->OpenByMnemonic(hwnd_, static_cast<wchar_t>(wp))) {
+            return 0;
+        }
+        break;
 
     case WM_COMMAND:
         switch (LOWORD(wp)) {
@@ -391,7 +490,7 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
                 L"Marek Weso\u0142owski - WESMAR\n"
                 L"\u00A9 2026\n"
                 L"marek@kvc.pl\n"
-                L"Wahtsapp: +48 607-440-283",
+                L"WhatsApp: +48 607-440-283",
                 L"About KvcForensic", MB_OK | MB_ICONINFORMATION);
             return 0;
         }
@@ -403,21 +502,31 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
             auto* ntv = reinterpret_cast<NMTREEVIEWW*>(lp);
             ShowNodeDetail(ntv->itemNew.lParam);
         }
-        if (nm->hwndFrom == detail_ && nm->code == NM_RCLICK) {
-            POINT pt; ::GetCursorPos(&pt);
-            HMENU hCtx = ::CreatePopupMenu();
-            int sel = ListView_GetSelectedCount(detail_);
-            ::AppendMenuW(hCtx, MF_STRING | (sel > 0 ? 0 : MF_GRAYED),
-                IDM_EDIT_COPY, L"Copy\tCtrl+C");
-            ::TrackPopupMenu(hCtx, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd_, nullptr);
-            ::DestroyMenu(hCtx);
+        if (nm->hwndFrom == detail_ && nm->code == NM_CUSTOMDRAW) {
+            return HandleListCustomDraw(reinterpret_cast<NMLVCUSTOMDRAW*>(lp));
+        }
+        if (nm->hwndFrom == detail_ && nm->code == NM_RCLICK && menu_bar_ && context_menu_) {
+            POINT pt{};
+            ::GetCursorPos(&pt);
+            const int sel = ListView_GetSelectedCount(detail_);
+            ::EnableMenuItem(context_menu_, IDM_EDIT_COPY,
+                MF_BYCOMMAND | (sel > 0 ? MF_ENABLED : MF_GRAYED));
+            menu_bar_->TrackContext(hwnd_, context_menu_, pt);
         }
         return 0;
     }
 
     case WM_LBUTTONDOWN: {
-        int x = (short)LOWORD(lp);
-        if (x >= splitter_x_ && x < splitter_x_ + kSplitterW) {
+        const POINT pt{ static_cast<short>(LOWORD(lp)), static_cast<short>(HIWORD(lp)) };
+        if (menu_bar_) {
+            const int hit = menu_bar_->HitTest(pt);
+            if (hit >= 0) {
+                menu_bar_->Open(hwnd_, hit, false);
+                return 0;
+            }
+        }
+        const int split_w = fonts_.S(kSplitterDip);
+        if (pt.x >= splitter_x_ && pt.x < splitter_x_ + split_w && pt.y >= fonts_.S(kMenuBarDip)) {
             splitter_drag_ = true;
             ::SetCapture(hwnd_);
             ::SetCursor(::LoadCursorW(nullptr, IDC_SIZEWE));
@@ -426,27 +535,50 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
     }
 
     case WM_MOUSEMOVE: {
+        const POINT pt{ static_cast<short>(LOWORD(lp)), static_cast<short>(HIWORD(lp)) };
+        if (!tracking_mouse_) {
+            TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, hwnd_, 0 };
+            ::TrackMouseEvent(&tme);
+            tracking_mouse_ = true;
+        }
         if (splitter_drag_) {
-            int x = (short)LOWORD(lp);
-            RECT rc; ::GetClientRect(hwnd_, &rc);
-            int limit = rc.right - kSplitterMin;
-            splitter_x_ = std::clamp(x, kSplitterMin, std::max(kSplitterMin, limit));
+            RECT rc{};
+            ::GetClientRect(hwnd_, &rc);
+            const int min_split = fonts_.S(kSplitterMinDip);
+            const int limit = rc.right - min_split;
+            splitter_x_ = std::clamp(static_cast<int>(pt.x), min_split, std::max(min_split, limit));
             LayoutControls(rc.right, rc.bottom);
+            ::InvalidateRect(hwnd_, nullptr, FALSE);
+        } else if (menu_bar_) {
+            if (menu_bar_->SetHot(menu_bar_->HitTest(pt))) {
+                InvalidateMenuBar();
+            }
         }
         return 0;
     }
+
+    case WM_MOUSELEAVE:
+        tracking_mouse_ = false;
+        if (menu_bar_ && menu_bar_->SetHot(-1)) {
+            InvalidateMenuBar();
+        }
+        return 0;
 
     case WM_LBUTTONUP:
         if (splitter_drag_) {
             splitter_drag_ = false;
             ::ReleaseCapture();
+            SaveWindowState();
         }
         return 0;
 
     case WM_SETCURSOR: {
-        if ((HWND)wp == hwnd_) {
-            POINT pt; ::GetCursorPos(&pt); ::ScreenToClient(hwnd_, &pt);
-            if (pt.x >= splitter_x_ && pt.x < splitter_x_ + kSplitterW) {
+        if (reinterpret_cast<HWND>(wp) == hwnd_) {
+            POINT pt{};
+            ::GetCursorPos(&pt);
+            ::ScreenToClient(hwnd_, &pt);
+            const int split_w = fonts_.S(kSplitterDip);
+            if (pt.x >= splitter_x_ && pt.x < splitter_x_ + split_w && pt.y >= fonts_.S(kMenuBarDip)) {
                 ::SetCursor(::LoadCursorW(nullptr, IDC_SIZEWE));
                 return TRUE;
             }
@@ -459,15 +591,6 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
             UpdateTheme();
         return 0;
 
-    case WM_ERASEBKGND: {
-        // Paint the splitter band in a contrasting color
-        HDC hdc = reinterpret_cast<HDC>(wp);
-        RECT rc; ::GetClientRect(hwnd, &rc);
-        ::FillRect(hdc, &rc, bg_brush_ ? bg_brush_
-                                       : reinterpret_cast<HBRUSH>(COLOR_BTNFACE + 1));
-        return 1;
-    }
-
     case WM_APP + 1: {
         auto* result = reinterpret_cast<analysis::SafeAnalysisReport*>(lp);
         OnAnalysisDone(result);
@@ -476,11 +599,14 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
 
     case WM_DESTROY:
         if (analysis_thread_.joinable()) analysis_thread_.join();
-        if (font_)   ::DeleteObject(font_);
-        if (bg_brush_) ::DeleteObject(bg_brush_);
+        SaveWindowState();
+        if (detail_) ::RemoveWindowSubclass(detail_, &KvcForensicWindow::DetailSubclassProc, 1);
+        menu_bar_.reset();
+        if (grid_pen_)   { ::DeleteObject(grid_pen_);  grid_pen_   = nullptr; }
+        if (font_)       { ::DeleteObject(font_);      font_       = nullptr; }
         // accel_ loaded via LoadAcceleratorsW -- owned by the OS, not destroyed manually
-        if (icon_big_) ::DestroyIcon(icon_big_);
-        if (icon_small_) ::DestroyIcon(icon_small_);
+        if (icon_big_)   { ::DestroyIcon(icon_big_);   icon_big_   = nullptr; }
+        if (icon_small_) { ::DestroyIcon(icon_small_); icon_small_ = nullptr; }
         ::PostQuitMessage(0);
         return 0;
 
@@ -492,102 +618,404 @@ LRESULT KvcForensicWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
 // ---------------------------------------------------------------------------
 // Controls
 // ---------------------------------------------------------------------------
-void KvcForensicWindow::CreateControls(HWND hwnd) {
-    // Font
+void KvcForensicWindow::RecreateFonts(UINT dpi) {
+    dpi_ = dpi ? dpi : 96;
+    fonts_.Create(dpi_);
+
+    if (font_) {
+        ::DeleteObject(font_);
+        font_ = nullptr;
+    }
     LOGFONTW lf{};
-    lf.lfHeight = -14;
-    lf.lfWeight = FW_NORMAL;
-    wcscpy_s(lf.lfFaceName, L"Segoe UI");
+    lf.lfHeight  = -fonts_.S(13);
+    lf.lfWeight  = FW_NORMAL;
+    lf.lfQuality = CLEARTYPE_QUALITY;
+    wcscpy_s(lf.lfFaceName, fonts_.UiFamily());
     font_ = ::CreateFontIndirectW(&lf);
 
-    // TreeView (left panel)
+    if (tree_ && font_)   ::SendMessageW(tree_,   WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+    if (detail_ && font_) ::SendMessageW(detail_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+}
+
+void KvcForensicWindow::RestoreWindowState() {
+    if (!hwnd_) return;
+
+    HKEY key = nullptr;
+    if (::RegOpenKeyExW(HKEY_CURRENT_USER, kSettingsKey, 0, KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
+        return;
+    }
+
+    DWORD splitter_dip = 0;
+    DWORD splitter_size = sizeof(splitter_dip);
+    if (::RegQueryValueExW(key, kSplitterDipValue, nullptr, nullptr,
+                           reinterpret_cast<LPBYTE>(&splitter_dip), &splitter_size) == ERROR_SUCCESS &&
+        splitter_size == sizeof(splitter_dip) && splitter_dip != 0) {
+        splitter_x_ = fonts_.S(static_cast<int>(splitter_dip));
+    }
+
+    WINDOWPLACEMENT placement{};
+    placement.length = sizeof(placement);
+    DWORD placement_size = sizeof(placement);
+    if (::RegQueryValueExW(key, kWindowPlacementValue, nullptr, nullptr,
+                           reinterpret_cast<LPBYTE>(&placement), &placement_size) == ERROR_SUCCESS &&
+        placement_size == sizeof(placement) && placement.length == sizeof(placement)) {
+        const HMONITOR monitor = ::MonitorFromRect(
+            &placement.rcNormalPosition, MONITOR_DEFAULTTONULL);
+        const int width = placement.rcNormalPosition.right - placement.rcNormalPosition.left;
+        const int height = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
+        if (monitor != nullptr && width >= fonts_.S(480) && height >= fonts_.S(320)) {
+            placement.showCmd =
+                (placement.showCmd == SW_SHOWMAXIMIZED) ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+            if (::SetWindowPlacement(hwnd_, &placement)) {
+                initial_show_cmd_ = placement.showCmd;
+            }
+        }
+    }
+    ::RegCloseKey(key);
+}
+
+void KvcForensicWindow::SaveWindowState() const {
+    if (!hwnd_) return;
+
+    HKEY key = nullptr;
+    if (::RegCreateKeyExW(HKEY_CURRENT_USER, kSettingsKey, 0, nullptr, 0,
+                          KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) {
+        return;
+    }
+
+    WINDOWPLACEMENT placement{};
+    placement.length = sizeof(placement);
+    if (::GetWindowPlacement(hwnd_, &placement)) {
+        ::RegSetValueExW(key, kWindowPlacementValue, 0, REG_BINARY,
+                         reinterpret_cast<const BYTE*>(&placement), sizeof(placement));
+    }
+
+    const DWORD splitter_dip = static_cast<DWORD>(::MulDiv(
+        splitter_x_, 96, static_cast<int>(dpi_ ? dpi_ : 96)));
+    ::RegSetValueExW(key, kSplitterDipValue, 0, REG_DWORD,
+                     reinterpret_cast<const BYTE*>(&splitter_dip), sizeof(splitter_dip));
+    ::RegCloseKey(key);
+}
+
+void KvcForensicWindow::CreateControls(HWND hwnd) {
+    const UINT init_dpi = ::GetDpiForWindow(hwnd);
+    RecreateFonts(init_dpi);
+    splitter_x_ = fonts_.S(280);
+
+    // TreeView (left panel) — no legacy WS_EX_CLIENTEDGE; subtle D2D border painted around it
     tree_ = ::CreateWindowExW(
-        WS_EX_CLIENTEDGE, WC_TREEVIEWW, L"",
+        0, WC_TREEVIEWW, L"",
         WS_CHILD | WS_VISIBLE | TVS_HASLINES | TVS_HASBUTTONS |
-        TVS_LINESATROOT | TVS_SHOWSELALWAYS,
+        TVS_LINESATROOT | TVS_SHOWSELALWAYS | TVS_FULLROWSELECT,
         0, 0, splitter_x_, 400,
         hwnd, nullptr, nullptr, nullptr);
-    if (font_) ::SendMessageW(tree_, WM_SETFONT, (WPARAM)font_, TRUE);
+    if (font_) ::SendMessageW(tree_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
 
-    // ListView detail panel (right)
+    // ListView detail panel (right) — custom-drawn subtle gridlines & dark/light header
     detail_ = ::CreateWindowExW(
-        WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
+        0, WC_LISTVIEWW, L"",
         WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_NOSORTHEADER,
-        splitter_x_ + kSplitterW, 0, 400, 400,
+        splitter_x_ + fonts_.S(kSplitterDip), 0, 400, 400,
         hwnd, nullptr, nullptr, nullptr);
     ::SendMessageW(detail_, LVM_SETEXTENDEDLISTVIEWSTYLE,
-        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES,
-        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
-    if (font_) ::SendMessageW(detail_, WM_SETFONT, (WPARAM)font_, TRUE);
+        LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER,
+        LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    if (font_) ::SendMessageW(detail_, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
+    ::SetWindowSubclass(detail_, &KvcForensicWindow::DetailSubclassProc, 1, reinterpret_cast<DWORD_PTR>(this));
 
     // Detail columns: Property | Value
     LVCOLUMNW col{};
     col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
     col.fmt  = LVCFMT_LEFT;
-    col.cx   = 160;
+    col.cx   = fonts_.S(180);
     col.pszText = const_cast<wchar_t*>(L"Property");
     ListView_InsertColumn(detail_, 0, &col);
-    col.cx      = 400;
+    col.cx      = fonts_.S(420);
     col.pszText = const_cast<wchar_t*>(L"Value");
     ListView_InsertColumn(detail_, 1, &col);
 
-    // Status bar
-    status_bar_ = ::CreateWindowExW(
-        0, STATUSCLASSNAME, nullptr,
-        WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP,
-        0, 0, 0, 0,
-        hwnd, nullptr, nullptr, nullptr);
-    if (font_) ::SendMessageW(status_bar_, WM_SETFONT, (WPARAM)font_, TRUE);
+    // Initial status bar strings (rendered via Direct2D on Mica)
+    status_text_[SB_FILE]  = L"No file loaded";
+    status_text_[SB_BUILD] = L"";
+    status_text_[SB_STATE] = L"Ready";
 
-    // Set status bar parts (right edges; -1 = fill rest)
-    int parts[3] = { 420, 620, -1 };
-    ::SendMessageW(status_bar_, SB_SETPARTS, 3, reinterpret_cast<LPARAM>(parts));
-    SetStatus(SB_FILE,  L"No file loaded");
-    SetStatus(SB_BUILD, L"");
-    SetStatus(SB_STATE, L"Ready");
-
-    // Menu + accelerators
+    // Direct2D MenuBar + owner-drawn popups + accelerators
     CreateAppMenu();
 
     // Layout
-    RECT rc{}; ::GetClientRect(hwnd, &rc);
+    RECT rc{};
+    ::GetClientRect(hwnd, &rc);
     LayoutControls(rc.right, rc.bottom);
 }
 
 void KvcForensicWindow::CreateAppMenu() {
-    HMENU hBar = ::LoadMenuW(hInstance_, MAKEINTRESOURCEW(IDR_MAIN_MENU));
-    if (hBar) {
-        ::SetMenu(hwnd_, hBar);
-        view_menu_ = ::GetSubMenu(hBar, 1); // View is at index 1 (File=0, View=1, Help=2)
-    }
+    menu_bar_ = std::make_unique<MenuBar>(fonts_);
+
+    file_menu_ = menu_bar_->AddMenu(L"&File");
+    menu_bar_->AddItem(file_menu_, IDM_FILE_OPEN, L"Open Dump...", L"Ctrl+O");
+    menu_bar_->AddSeparator(file_menu_);
+    menu_bar_->AddItem(file_menu_, IDM_FILE_EXIT, L"Exit", L"Alt+F4");
+
+    view_menu_ = menu_bar_->AddMenu(L"&View");
+    menu_bar_->AddItem(view_menu_, IDM_VIEW_ADVANCED, L"Advanced (show all accounts)");
+
+    HMENU help_menu = menu_bar_->AddMenu(L"&Help");
+    menu_bar_->AddItem(help_menu, IDM_HELP_ABOUT, L"About KvcForensic");
+
+    context_menu_ = menu_bar_->CreatePopup();
+    menu_bar_->AddItem(context_menu_, IDM_EDIT_COPY, L"Copy", L"Ctrl+C");
 
     accel_ = ::LoadAcceleratorsW(hInstance_, MAKEINTRESOURCEW(IDA_MAIN));
 }
 
 void KvcForensicWindow::LayoutControls(int w, int h) {
-    // Status bar height
-    int sbh = 0;
-    if (status_bar_) {
-        ::SendMessageW(status_bar_, WM_SIZE, 0, MAKELPARAM(w, h));
-        RECT sbrc{}; ::GetWindowRect(status_bar_, &sbrc);
-        sbh = sbrc.bottom - sbrc.top;
+    const int pad      = fonts_.S(kOuterPadDip);
+    const int menu_h   = fonts_.S(kMenuBarDip);
+    const int status_h = fonts_.S(kStatusBarDip);
+    const int split_w  = fonts_.S(kSplitterDip);
+
+    if (menu_bar_) {
+        menu_bar_->Layout(static_cast<float>(pad), fonts_.F(4.0f), static_cast<float>(menu_h - fonts_.S(8)));
     }
 
-    int content_h = std::max(0, h - sbh);
+    const int top = menu_h + 1;
+    const int content_h = std::max(0, h - top - status_h - 1);
 
-    if (tree_)
-        ::MoveWindow(tree_, 0, 0, splitter_x_, content_h, TRUE);
+    const int tree_x = pad + 1;
+    const int tree_w = std::max(0, splitter_x_ - tree_x - 1);
+    if (tree_) {
+        ::MoveWindow(tree_, tree_x, top, tree_w, content_h, TRUE);
+    }
 
     if (detail_) {
-        int dx = splitter_x_ + kSplitterW;
-        int dw = std::max(0, w - dx);
-        ::MoveWindow(detail_, dx, 0, dw, content_h, TRUE);
+        const int dx = splitter_x_ + split_w + 1;
+        const int dw = std::max(0, w - pad - dx - 1);
+        ::MoveWindow(detail_, dx, top, dw, content_h, TRUE);
 
-        // Auto-size value column to fill remaining width
-        int prop_w = 160;
-        int val_w  = std::max(80, dw - prop_w - 4);
+        const int prop_w = fonts_.S(180);
+        const int val_w  = std::max(fonts_.S(80), dw - prop_w - fonts_.S(6));
         ListView_SetColumnWidth(detail_, 0, prop_w);
         ListView_SetColumnWidth(detail_, 1, val_w);
+    }
+}
+
+void KvcForensicWindow::InvalidateMenuBar() {
+    if (!hwnd_) return;
+    RECT rc{};
+    ::GetClientRect(hwnd_, &rc);
+    rc.bottom = fonts_.S(kMenuBarDip) + 2;
+    ::InvalidateRect(hwnd_, &rc, FALSE);
+}
+
+void KvcForensicWindow::InvalidateStatusBar() {
+    if (!hwnd_) return;
+    RECT rc{};
+    ::GetClientRect(hwnd_, &rc);
+    rc.top = std::max(0L, rc.bottom - fonts_.S(kStatusBarDip) - 2);
+    ::InvalidateRect(hwnd_, &rc, FALSE);
+}
+
+void KvcForensicWindow::PaintWindow(HDC hdc) {
+    RECT rc{};
+    ::GetClientRect(hwnd_, &rc);
+    if (rc.right <= rc.left || rc.bottom <= rc.top) return;
+
+    const Palette& pal = Palette::For(is_dark_mode_);
+    const int pad      = fonts_.S(kOuterPadDip);
+    const int menu_h   = fonts_.S(kMenuBarDip);
+    const int status_h = fonts_.S(kStatusBarDip);
+    const int split_w  = fonts_.S(kSplitterDip);
+
+    PaintD2D(hdc, rc, fonts_, [&](Canvas& c) {
+        // Transparent on Mica (reveals DWM backdrop in extended top/bottom/side margins);
+        // opaque base on Win10 / High Contrast.
+        c.Clear(Graphics::Get().Base(is_dark_mode_));
+
+        const float top_f = static_cast<float>(menu_h);
+        const float bot_f = static_cast<float>(rc.bottom - status_h);
+
+        // Interior band behind GDI child controls (outside extended Mica margins) is opaque
+        // so TreeView/ListView scrollbars, headers, and gridlines keep full alpha.
+        if (bot_f > top_f) {
+            c.Fill({
+                static_cast<float>(pad), top_f,
+                static_cast<float>(rc.right - pad), bot_f
+            }, pal.opaque_base);
+        }
+
+        // 1. Direct2D MenuBar + subtle bottom divider
+        if (menu_bar_) menu_bar_->Paint(c);
+        c.Line({0.0f, top_f - 0.5f}, {static_cast<float>(rc.right), top_f - 0.5f}, pal.divider);
+
+        // 2. Hairline frames around TreeView & ListView + subtle splitter grip
+        if (bot_f > top_f + 2.0f) {
+            const D2D1_RECT_F tree_frame{
+                static_cast<float>(pad), top_f,
+                static_cast<float>(splitter_x_), bot_f
+            };
+            const D2D1_RECT_F detail_frame{
+                static_cast<float>(splitter_x_ + split_w), top_f,
+                static_cast<float>(rc.right - pad), bot_f
+            };
+            c.Stroke(tree_frame,   pal.divider, 0.0f, 1.0f);
+            c.Stroke(detail_frame, pal.divider, 0.0f, 1.0f);
+
+            // Centered subtle splitter grip pill
+            const float gx = static_cast<float>(splitter_x_) + static_cast<float>(split_w) * 0.5f;
+            const float gy = (top_f + bot_f) * 0.5f;
+            const float gh = fonts_.F(18.0f);
+            c.Fill({gx - 1.0f, gy - gh, gx + 1.0f, gy + gh}, pal.splitter_grip, 1.0f);
+        }
+
+        // 3. Direct2D Status bar (3 segments on Mica, with crisp top divider & warning highlight)
+        const float sb_top = static_cast<float>(rc.bottom - status_h);
+        const float sb_bot = static_cast<float>(rc.bottom);
+        c.Line({0.0f, sb_top + 0.5f}, {static_cast<float>(rc.right), sb_top + 0.5f}, pal.divider);
+        const float sb_l   = static_cast<float>(pad);
+        const float sb_r   = static_cast<float>(rc.right - pad);
+
+        const float w_total = std::max(0.0f, sb_r - sb_l);
+        const float w_file  = std::min(fonts_.F(360.0f), w_total * 0.42f);
+        const float w_build = std::min(fonts_.F(180.0f), w_total * 0.22f);
+        const float x_build = sb_l + w_file;
+        const float x_state = x_build + w_build;
+
+        c.Text(status_text_[SB_FILE],  {sb_l + fonts_.F(4.0f), sb_top, x_build - fonts_.F(8.0f), sb_bot},
+               Font::Caption, pal.text_secondary, Align::Left);
+        if (!status_text_[SB_BUILD].empty()) {
+            c.Line({x_build, sb_top + fonts_.F(7.0f)}, {x_build, sb_bot - fonts_.F(7.0f)}, pal.divider);
+            c.Text(status_text_[SB_BUILD], {x_build + fonts_.F(10.0f), sb_top, x_state - fonts_.F(8.0f), sb_bot},
+                   Font::Caption, pal.text_secondary, Align::Left);
+        }
+
+        const D2D1_RECT_F state_rc{x_state + fonts_.F(8.0f), sb_top + fonts_.F(4.0f), sb_r, sb_bot - fonts_.F(4.0f)};
+        if (status_warning_) {
+            c.Fill(state_rc, pal.warning_bg, fonts_.F(4.0f));
+            c.Text(status_text_[SB_STATE], Inset(state_rc, fonts_.F(8.0f), 0.0f),
+                   Font::Caption, pal.warning_text, Align::Left);
+        } else {
+            c.Line({x_state, sb_top + fonts_.F(7.0f)}, {x_state, sb_bot - fonts_.F(7.0f)}, pal.divider);
+            c.Text(status_text_[SB_STATE], {x_state + fonts_.F(10.0f), sb_top, sb_r - fonts_.F(4.0f), sb_bot},
+                   Font::Caption, pal.text_muted, Align::Left);
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Custom draw for ListView & Header (subtle theme-aware gridlines + dark header)
+// ---------------------------------------------------------------------------
+LRESULT CALLBACK KvcForensicWindow::DetailSubclassProc(
+    HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+    auto* self = reinterpret_cast<KvcForensicWindow*>(dwRefData);
+    if (msg == WM_NOTIFY && self) {
+        auto* nm = reinterpret_cast<NMHDR*>(lp);
+        if (nm && nm->code == NM_CUSTOMDRAW && nm->hwndFrom == ListView_GetHeader(hwnd)) {
+            return self->HandleHeaderCustomDraw(reinterpret_cast<NMCUSTOMDRAW*>(lp));
+        }
+    }
+    if (msg == WM_NCDESTROY) {
+        ::RemoveWindowSubclass(hwnd, &KvcForensicWindow::DetailSubclassProc, uIdSubclass);
+    }
+    return ::DefSubclassProc(hwnd, msg, wp, lp);
+}
+
+LRESULT KvcForensicWindow::HandleHeaderCustomDraw(NMCUSTOMDRAW* cd) {
+    if (!cd) return CDRF_DODEFAULT;
+    const COLORREF bg   = is_dark_mode_ ? RGB(40, 40, 40)   : RGB(246, 246, 246);
+    const COLORREF text = is_dark_mode_ ? RGB(228, 228, 228) : RGB(36, 36, 36);
+    const COLORREF line = is_dark_mode_ ? RGB(60, 60, 60)   : RGB(222, 222, 222);
+
+    if (cd->dwDrawStage == CDDS_PREPAINT) {
+        RECT hdr_rc{};
+        ::GetClientRect(cd->hdr.hwndFrom, &hdr_rc);
+        HBRUSH br = ::CreateSolidBrush(bg);
+        ::FillRect(cd->hdc, &hdr_rc, br);
+        ::DeleteObject(br);
+
+        HPEN pen = ::CreatePen(PS_SOLID, 1, line);
+        HGDIOBJ old_pen = ::SelectObject(cd->hdc, pen);
+        ::MoveToEx(cd->hdc, hdr_rc.left, hdr_rc.bottom - 1, nullptr);
+        ::LineTo(cd->hdc, hdr_rc.right, hdr_rc.bottom - 1);
+        ::SelectObject(cd->hdc, old_pen);
+        ::DeleteObject(pen);
+        return CDRF_NOTIFYITEMDRAW;
+    }
+
+    if (cd->dwDrawStage == CDDS_ITEMPREPAINT) {
+        HBRUSH br = ::CreateSolidBrush(bg);
+        ::FillRect(cd->hdc, &cd->rc, br);
+        ::DeleteObject(br);
+
+        HPEN pen = ::CreatePen(PS_SOLID, 1, line);
+        HGDIOBJ old_pen = ::SelectObject(cd->hdc, pen);
+        // Bottom border
+        ::MoveToEx(cd->hdc, cd->rc.left, cd->rc.bottom - 1, nullptr);
+        ::LineTo(cd->hdc, cd->rc.right, cd->rc.bottom - 1);
+        // Right column separator
+        ::MoveToEx(cd->hdc, cd->rc.right - 1, cd->rc.top + fonts_.S(4), nullptr);
+        ::LineTo(cd->hdc, cd->rc.right - 1, cd->rc.bottom - fonts_.S(5));
+        ::SelectObject(cd->hdc, old_pen);
+        ::DeleteObject(pen);
+
+        wchar_t label[128] = {};
+        HDITEMW hdi{};
+        hdi.mask = HDI_TEXT;
+        hdi.pszText = label;
+        hdi.cchTextMax = static_cast<int>(std::size(label));
+        Header_GetItem(cd->hdr.hwndFrom, static_cast<int>(cd->dwItemSpec), &hdi);
+
+        RECT text_rc = cd->rc;
+        text_rc.left  += fonts_.S(8);
+        text_rc.right -= fonts_.S(6);
+        HGDIOBJ old_font = font_ ? ::SelectObject(cd->hdc, font_) : nullptr;
+        ::SetBkMode(cd->hdc, TRANSPARENT);
+        ::SetTextColor(cd->hdc, text);
+        ::DrawTextW(cd->hdc, label, -1, &text_rc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        if (old_font) ::SelectObject(cd->hdc, old_font);
+        return CDRF_SKIPDEFAULT;
+    }
+    return CDRF_DODEFAULT;
+}
+
+LRESULT KvcForensicWindow::HandleListCustomDraw(NMLVCUSTOMDRAW* cd) {
+    if (!cd) return CDRF_DODEFAULT;
+    switch (cd->nmcd.dwDrawStage) {
+    case CDDS_PREPAINT:
+        return CDRF_NOTIFYITEMDRAW;
+
+    case CDDS_ITEMPREPAINT: {
+        const bool odd = (cd->nmcd.dwItemSpec & 1u) != 0;
+        if (is_dark_mode_) {
+            cd->clrTextBk = odd ? RGB(37, 37, 37) : RGB(32, 32, 32);
+            cd->clrText   = RGB(240, 240, 240);
+        } else {
+            cd->clrTextBk = odd ? RGB(248, 249, 250) : RGB(255, 255, 255);
+            cd->clrText   = RGB(24, 24, 24);
+        }
+        return CDRF_NEWFONT | CDRF_NOTIFYPOSTPAINT;
+    }
+
+    case CDDS_ITEMPOSTPAINT: {
+        if (grid_pen_) {
+            RECT rc{};
+            ListView_GetItemRect(detail_, static_cast<int>(cd->nmcd.dwItemSpec), &rc, LVIR_BOUNDS);
+            const int col0_w = ListView_GetColumnWidth(detail_, 0);
+            HGDIOBJ old_pen = ::SelectObject(cd->nmcd.hdc, grid_pen_);
+            // Subtle bottom horizontal rule
+            ::MoveToEx(cd->nmcd.hdc, rc.left, rc.bottom - 1, nullptr);
+            ::LineTo(cd->nmcd.hdc, rc.right, rc.bottom - 1);
+            // Subtle vertical column divider
+            if (col0_w > 0) {
+                ::MoveToEx(cd->nmcd.hdc, rc.left + col0_w - 1, rc.top, nullptr);
+                ::LineTo(cd->nmcd.hdc, rc.left + col0_w - 1, rc.bottom);
+            }
+            ::SelectObject(cd->nmcd.hdc, old_pen);
+        }
+        return CDRF_DODEFAULT;
+    }
+
+    default:
+        return CDRF_DODEFAULT;
     }
 }
 
@@ -600,40 +1028,46 @@ void KvcForensicWindow::UpdateTheme() {
 }
 
 void KvcForensicWindow::ApplyTheme() {
-    if (bg_brush_) { ::DeleteObject(bg_brush_); bg_brush_ = nullptr; }
+    SetUxThemePreferredAppMode(is_dark_mode_);
 
-    BOOL dark = is_dark_mode_;
-    ::DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    if (grid_pen_) {
+        ::DeleteObject(grid_pen_);
+        grid_pen_ = nullptr;
+    }
+    grid_pen_ = ::CreatePen(PS_SOLID, 1, is_dark_mode_ ? RGB(52, 52, 52) : RGB(224, 224, 224));
+
+    const MARGINS m{ fonts_.S(kOuterPadDip), fonts_.S(kOuterPadDip),
+                     fonts_.S(kMenuBarDip),  fonts_.S(kStatusBarDip) };
+    ApplyBackdrop(hwnd_, is_dark_mode_, m);
+    if (menu_bar_) menu_bar_->SetDarkMode(is_dark_mode_);
+
+    const Palette& pal = Palette::For(is_dark_mode_);
 
     if (is_dark_mode_) {
-        constexpr COLORREF clrBg   = RGB(32, 32, 32);
-        constexpr COLORREF clrText = RGB(255, 255, 255);
-        bg_brush_ = ::CreateSolidBrush(RGB(40, 40, 40));
         if (tree_) {
             ::SetWindowTheme(tree_, L"DarkMode_Explorer", nullptr);
-            TreeView_SetBkColor(tree_, clrBg);
-            TreeView_SetTextColor(tree_, clrText);
+            TreeView_SetBkColor(tree_, pal.surface_bg);
+            TreeView_SetTextColor(tree_, pal.surface_text);
         }
         if (detail_) {
             ::SetWindowTheme(detail_, L"DarkMode_Explorer", nullptr);
-            ListView_SetBkColor(detail_, clrBg);
-            ListView_SetTextBkColor(detail_, clrBg);
-            ListView_SetTextColor(detail_, clrText);
+            ListView_SetBkColor(detail_, pal.surface_bg);
+            ListView_SetTextBkColor(detail_, pal.surface_bg);
+            ListView_SetTextColor(detail_, pal.surface_text);
             HWND hdr = ListView_GetHeader(detail_);
             if (hdr) ::SetWindowTheme(hdr, L"DarkMode_Header", nullptr);
         }
     } else {
-        bg_brush_ = ::CreateSolidBrush(RGB(220, 220, 220));
         if (tree_) {
             ::SetWindowTheme(tree_, L"Explorer", nullptr);
-            TreeView_SetBkColor(tree_, static_cast<COLORREF>(-1));
-            TreeView_SetTextColor(tree_, static_cast<COLORREF>(-1));
+            TreeView_SetBkColor(tree_, pal.surface_bg);
+            TreeView_SetTextColor(tree_, pal.surface_text);
         }
         if (detail_) {
             ::SetWindowTheme(detail_, L"Explorer", nullptr);
-            ListView_SetBkColor(detail_, CLR_NONE);
-            ListView_SetTextBkColor(detail_, CLR_NONE);
-            ListView_SetTextColor(detail_, static_cast<COLORREF>(-1));
+            ListView_SetBkColor(detail_, pal.surface_bg);
+            ListView_SetTextBkColor(detail_, pal.surface_bg);
+            ListView_SetTextColor(detail_, pal.surface_text);
             HWND hdr = ListView_GetHeader(detail_);
             if (hdr) ::SetWindowTheme(hdr, L"Header", nullptr);
         }
@@ -673,8 +1107,7 @@ void KvcForensicWindow::LoadDump(const std::wstring& path) {
     SetStatusWarningMode(false);
 
     // Disable File > Open while busy
-    HMENU hBar = ::GetMenu(hwnd_);
-    if (hBar) ::EnableMenuItem(hBar, IDM_FILE_OPEN, MF_BYCOMMAND | MF_GRAYED);
+    if (file_menu_) ::EnableMenuItem(file_menu_, IDM_FILE_OPEN, MF_BYCOMMAND | MF_GRAYED);
 
     ::UpdateWindow(hwnd_);
 
@@ -687,12 +1120,9 @@ void KvcForensicWindow::LoadDump(const std::wstring& path) {
 }
 
 void KvcForensicWindow::SetStatusWarningMode(const bool warning) {
-    if (!status_bar_) return;
-    if (warning) {
-        ::SendMessageW(status_bar_, SB_SETBKCOLOR, 0, static_cast<LPARAM>(RGB(170, 42, 42)));
-    } else {
-        ::SendMessageW(status_bar_, SB_SETBKCOLOR, 0, static_cast<LPARAM>(CLR_DEFAULT));
-    }
+    if (status_warning_ == warning) return;
+    status_warning_ = warning;
+    InvalidateStatusBar();
 }
 
 void KvcForensicWindow::OnAnalysisDone(analysis::SafeAnalysisReport* result) {
@@ -705,8 +1135,7 @@ void KvcForensicWindow::OnAnalysisDone(analysis::SafeAnalysisReport* result) {
     analyzing_.store(false);
 
     // Re-enable File > Open
-    HMENU hBar = ::GetMenu(hwnd_);
-    if (hBar) ::EnableMenuItem(hBar, IDM_FILE_OPEN, MF_BYCOMMAND | MF_ENABLED);
+    if (file_menu_) ::EnableMenuItem(file_menu_, IDM_FILE_OPEN, MF_BYCOMMAND | MF_ENABLED);
 
     if (report_.dump.system_info && report_.dump.system_info->valid) {
         const auto& si = *report_.dump.system_info;
@@ -1142,8 +1571,10 @@ void KvcForensicWindow::ShowNodeDetail(LPARAM p) {
 // Status bar
 // ---------------------------------------------------------------------------
 void KvcForensicWindow::SetStatus(int part, const wchar_t* text) {
-    if (status_bar_)
-        ::SendMessageW(status_bar_, SB_SETTEXTW, (WPARAM)part, reinterpret_cast<LPARAM>(text));
+    if (part >= 0 && part < static_cast<int>(status_text_.size())) {
+        status_text_[static_cast<std::size_t>(part)] = text ? text : L"";
+        InvalidateStatusBar();
+    }
 }
 
 

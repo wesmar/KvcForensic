@@ -19,6 +19,9 @@
     <Filter Include="source\security">
       <UniqueIdentifier>{2C24BBA7-9DE4-437B-8F28-4ED09EA1603A}</UniqueIdentifier>
     </Filter>
+    <Filter Include="source\ui">
+      <UniqueIdentifier>{BBBC6837-D85D-43ED-B684-73CB96909024}</UniqueIdentifier>
+    </Filter>
     <Filter Include="headers">
       <UniqueIdentifier>{1E5F0A6F-55B7-4BBF-A2F7-9BEAB2E68F4F}</UniqueIdentifier>
     </Filter>
@@ -36,6 +39,9 @@
     </Filter>
     <Filter Include="headers\security">
       <UniqueIdentifier>{AB2CFB70-4AE7-4BDB-BD7E-84E87AFC6B65}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="headers\ui">
+      <UniqueIdentifier>{68F15368-B992-43D1-AD72-8CE877596908}</UniqueIdentifier>
     </Filter>
     <Filter Include="resources">
       <UniqueIdentifier>{F3A1B2C4-7D8E-4F5A-9B6C-1D2E3F4A5B6C}</UniqueIdentifier>
@@ -93,6 +99,12 @@
     </ClCompile>
     <ClCompile Include="src\KvcForensicWindow.cpp">
       <Filter>source</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\D2DTheme.cpp">
+      <Filter>source\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\MenuBar.cpp">
+      <Filter>source\ui</Filter>
     </ClCompile>
     <ClCompile Include="src\minidump\MinidumpParser.cpp">
       <Filter>source\minidump</Filter>
@@ -204,6 +216,12 @@
     </ClInclude>
     <ClInclude Include="src\KvcForensicWindow.h">
       <Filter>headers</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\D2DTheme.h">
+      <Filter>headers\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\MenuBar.h">
+      <Filter>headers\ui</Filter>
     </ClInclude>
     <ClInclude Include="src\minidump\DbgHelpTypes.h">
       <Filter>headers\minidump</Filter>

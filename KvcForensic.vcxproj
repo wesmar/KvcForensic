@@ -30,6 +30,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
       <SDLCheck>true</SDLCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <ConformanceMode>true</ConformanceMode>
@@ -42,11 +43,14 @@
       <AdditionalOptions>/utf-8 /permissive- /FS %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>src;resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <Manifest>
+      <AdditionalManifestFiles>resources\KvcForensic.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>user32.lib;gdi32.lib;comctl32.lib;shell32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>user32.lib;gdi32.lib;comctl32.lib;shell32.lib;advapi32.lib;d2d1.lib;dwrite.lib;dwmapi.lib;uxtheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions>/BREPRO %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
@@ -76,6 +80,8 @@
     <ClCompile Include="src\lsa\LsaStructureParser.cpp" />
     <ClCompile Include="src\KvcForensicMain.cpp" />
     <ClCompile Include="src\KvcForensicWindow.cpp" />
+    <ClCompile Include="src\ui\D2DTheme.cpp" />
+    <ClCompile Include="src\ui\MenuBar.cpp" />
     <ClCompile Include="src\minidump\MinidumpParser.cpp" />
     <ClCompile Include="src\security\KerberosPackage.cpp" />
     <ClCompile Include="src\security\MsvPackage.cpp" />
@@ -114,6 +120,8 @@
     <ClInclude Include="src\lsa\LsaStructureParser.h" />
     <ClInclude Include="src\lsa\LsaStructures.h" />
     <ClInclude Include="src\KvcForensicWindow.h" />
+    <ClInclude Include="src\ui\D2DTheme.h" />
+    <ClInclude Include="src\ui\MenuBar.h" />
     <ClInclude Include="src\minidump\DbgHelpTypes.h" />
     <ClInclude Include="src\minidump\MinidumpParser.h" />
     <ClInclude Include="src\security\ISecurityPackage.h" />
