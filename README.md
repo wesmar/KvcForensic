@@ -16,6 +16,8 @@ the v4 16-bit field, timestamps are converted from FILETIME to Unix time, and th
 the complete DER ticket instead of the bare cipher. `tools/kvc_json_to_kirbi.py` can also build
 KRB-CRED directly from the enriched JSON output.
 
+</details>
+
 <details>
 <summary><strong>🖥️ Modern native GUI with Mica, dark mode, Direct2D, and restored window layout</strong></summary>
 
@@ -38,8 +40,6 @@ Additional Windows/Linux parity validation for this change covered builds `26100
 Those results matched after normalizing the JSON field naming used by each frontend, including
 all credential packages and complete Kerberos ticket metadata. This is additional coverage; the
 existing validation set and supported-build history below remain unchanged.
-
-</details>
 
 </details>
 
