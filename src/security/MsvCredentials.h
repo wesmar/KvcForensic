@@ -101,13 +101,38 @@ struct TspkgCredential {
     std::wstring to_wstring() const;
 };
 
+struct KerberosName {
+    std::uint16_t name_type = 0;
+    std::vector<std::wstring> components;
+
+    std::wstring DisplayName() const {
+        std::wstring out;
+        for (const auto& component : components) {
+            if (!out.empty()) out.push_back(L'/');
+            out.append(component);
+        }
+        return out;
+    }
+};
+
 struct KerberosTicket {
+    KerberosName service;
+    KerberosName target;
+    KerberosName client;
     std::wstring service_name;
     std::wstring target_name;
     std::wstring client_name;
+    std::wstring domain_name;
+    std::wstring target_domain_name;
+    std::wstring alt_target_domain_name;
     std::uint32_t flags     = 0;
+    std::uint32_t key_type  = 0;
     std::uint32_t enc_type  = 0;
     std::uint32_t kvno      = 0;
+    std::uint64_t start_time = 0;
+    std::uint64_t end_time = 0;
+    std::uint64_t renew_until = 0;
+    std::vector<std::byte> session_key;
     std::vector<std::byte> data;
 };
 

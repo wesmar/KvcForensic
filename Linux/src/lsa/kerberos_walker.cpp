@@ -3,7 +3,59 @@
 #include "core/signature_scanner.h"
 #include "lsa/reader_utils.h"
 
+#include <algorithm>
+#include <string>
+
 namespace kvc::lsa {
+
+namespace {
+
+KerberosName read_external_name(const core::VirtualMemory& vmem,
+                                std::uint64_t name_ptr,
+                                std::size_t first_string_offset) {
+    KerberosName out;
+    if (name_ptr == 0) return out;
+
+    std::uint16_t name_count = 0;
+    if (!vmem.read_struct(name_ptr, &out.name_type) ||
+        !vmem.read_struct(name_ptr + 2, &name_count)) {
+        return {};
+    }
+
+    constexpr std::uint16_t kMaxNameComponents = 64;
+    name_count = std::min(name_count, kMaxNameComponents);
+    out.components.reserve(name_count);
+    for (std::uint16_t i = 0; i < name_count; ++i) {
+        const auto string_va = name_ptr + first_string_offset +
+            static_cast<std::uint64_t>(i) * 16;
+        auto component = vmem.read_unicode_string(string_va);
+        if (!component.empty()) {
+            out.components.push_back(std::move(component));
+        }
+    }
+    return out;
+}
+
+std::vector<std::byte> read_buffer(const core::VirtualMemory& vmem,
+                                   std::uint64_t base,
+                                   std::size_t length_offset,
+                                   std::size_t pointer_offset,
+                                   std::uint32_t max_length) {
+    std::uint32_t length = 0;
+    std::uint64_t pointer = 0;
+    if (length_offset == 0 ||
+        !vmem.read_struct(base + length_offset, &length) ||
+        !vmem.read_struct(base + pointer_offset, &pointer) ||
+        length == 0 || length > max_length || pointer == 0) {
+        return {};
+    }
+
+    std::vector<std::byte> data(length);
+    if (!vmem.read_bytes(pointer, length, data)) return {};
+    return data;
+}
+
+} // namespace
 
 KerberosWalker::KerberosWalker(const core::VirtualMemory& vmem,
                                const core::ModuleIndex& modules,
@@ -127,24 +179,65 @@ void KerberosWalker::walk_tickets(std::uint64_t session_ptr, KerberosCredential&
             const std::uint64_t tgt = vmem_.read_u64(current + tmpl_->ticket_target_name_offset).value_or(0);
             const std::uint64_t cli = vmem_.read_u64(current + tmpl_->ticket_client_name_offset).value_or(0);
             const std::uint32_t flags = vmem_.read_u32(current + tmpl_->ticket_flags_offset).value_or(0);
+            const std::uint32_t key_type = vmem_.read_u32(current + tmpl_->ticket_key_type_offset).value_or(0);
             const std::uint32_t enc = vmem_.read_u32(current + tmpl_->ticket_enc_type_offset).value_or(0);
             const std::uint32_t kvno = vmem_.read_u32(current + tmpl_->ticket_kvno_offset).value_or(0);
             const std::uint32_t tlen = vmem_.read_u32(current + tmpl_->ticket_buffer_len_offset).value_or(0);
             const std::uint64_t tbuf = vmem_.read_u64(current + tmpl_->ticket_buffer_ptr_offset).value_or(0);
 
             const auto ext_off = tmpl_->external_name_first_string_offset;
-            std::string svc_name, tgt_name, cli_name;
-            if (svc != 0) svc_name = vmem_.read_unicode_string(svc + ext_off);
-            if (tgt != 0) tgt_name = vmem_.read_unicode_string(tgt + ext_off);
-            if (cli != 0) cli_name = vmem_.read_unicode_string(cli + ext_off);
+            const auto service = read_external_name(vmem_, svc, ext_off);
+            const auto target = read_external_name(vmem_, tgt, ext_off);
+            const auto client = read_external_name(vmem_, cli, ext_off);
 
             if (tlen > 0 && tlen < 0x10000 && tbuf != 0) {
                 std::vector<std::byte> data(tlen);
                 if (vmem_.read_bytes(tbuf, tlen, data)) {
                     KerberosTicket t;
-                    t.service_name = svc_name; t.target_name = tgt_name; t.client_name = cli_name;
-                    t.flags = flags; t.enc_type = enc; t.kvno = kvno;
+                    t.service = service;
+                    t.target = target;
+                    t.client = client;
+                    t.service_name = service.display_name();
+                    t.target_name = target.display_name();
+                    t.client_name = client.display_name();
+                    t.flags = flags;
+                    t.key_type = key_type;
+                    t.enc_type = enc;
+                    t.kvno = kvno;
                     t.data = std::move(data);
+
+                    if (tmpl_->ticket_domain_name_offset != 0) {
+                        t.domain_name = vmem_.read_unicode_string(
+                            current + tmpl_->ticket_domain_name_offset);
+                    }
+                    if (tmpl_->ticket_target_domain_offset != 0) {
+                        t.target_domain_name = vmem_.read_unicode_string(
+                            current + tmpl_->ticket_target_domain_offset);
+                    }
+                    if (tmpl_->ticket_alt_target_domain_offset != 0) {
+                        t.alt_target_domain_name = vmem_.read_unicode_string(
+                            current + tmpl_->ticket_alt_target_domain_offset);
+                    }
+                    if (tmpl_->ticket_key_len_offset != 0 &&
+                        tmpl_->ticket_key_ptr_offset != 0) {
+                        t.session_key = read_buffer(
+                            vmem_, current,
+                            tmpl_->ticket_key_len_offset,
+                            tmpl_->ticket_key_ptr_offset,
+                            0x1000);
+                    }
+                    if (tmpl_->ticket_start_time_offset != 0) {
+                        vmem_.read_struct(
+                            current + tmpl_->ticket_start_time_offset, &t.start_time);
+                    }
+                    if (tmpl_->ticket_end_time_offset != 0) {
+                        vmem_.read_struct(
+                            current + tmpl_->ticket_end_time_offset, &t.end_time);
+                    }
+                    if (tmpl_->ticket_renew_until_offset != 0) {
+                        vmem_.read_struct(
+                            current + tmpl_->ticket_renew_until_offset, &t.renew_until);
+                    }
                     cred.tickets.push_back(std::move(t));
                 }
             }

@@ -65,6 +65,14 @@ struct KerberosTemplateSpec {
     std::size_t ticket_buffer_len_offset = 0;
     std::size_t ticket_buffer_ptr_offset = 0;
     std::size_t external_name_first_string_offset = 0;
+    std::size_t ticket_domain_name_offset = 0;
+    std::size_t ticket_target_domain_offset = 0;
+    std::size_t ticket_alt_target_domain_offset = 0;
+    std::size_t ticket_key_len_offset = 0;
+    std::size_t ticket_key_ptr_offset = 0;
+    std::size_t ticket_start_time_offset = 0;
+    std::size_t ticket_end_time_offset = 0;
+    std::size_t ticket_renew_until_offset = 0;
 };
 
 struct DpapiTemplateSpec {

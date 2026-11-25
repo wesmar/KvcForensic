@@ -2,10 +2,65 @@
 
 #include "lsa/LsaReaderUtils.h"
 
+#include <algorithm>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace KvcForensic::lsa {
+
+namespace {
+
+security::KerberosName ReadExternalName(
+    const core::VirtualMemory& vmem,
+    const std::uint64_t name_ptr,
+    const std::size_t first_string_offset) {
+    security::KerberosName out;
+    if (name_ptr == 0) return out;
+
+    std::uint16_t name_count = 0;
+    if (!vmem.ReadStruct(name_ptr, &out.name_type) ||
+        !vmem.ReadStruct(name_ptr + 2, &name_count)) {
+        return {};
+    }
+
+    constexpr std::uint16_t kMaxNameComponents = 64;
+    name_count = (std::min)(name_count, kMaxNameComponents);
+    out.components.reserve(name_count);
+    for (std::uint16_t i = 0; i < name_count; ++i) {
+        const auto string_va = name_ptr + first_string_offset +
+            static_cast<std::uint64_t>(i) * 16;
+        auto component = ReadUnicodeString(vmem, string_va);
+        if (!component.empty()) {
+            out.components.push_back(std::move(component));
+        }
+    }
+    return out;
+}
+
+std::vector<std::byte> ReadBuffer(
+    const core::VirtualMemory& vmem,
+    const std::uint64_t base,
+    const std::size_t length_offset,
+    const std::size_t pointer_offset,
+    const std::uint32_t max_length) {
+    std::uint32_t length = 0;
+    std::uint64_t pointer = 0;
+    if (length_offset == 0 ||
+        !vmem.ReadStruct(base + length_offset, &length) ||
+        !vmem.ReadStruct(base + pointer_offset, &pointer) ||
+        length == 0 || length > max_length || pointer == 0) {
+        return {};
+    }
+
+    std::vector<std::byte> data(length);
+    if (!vmem.ReadBytes(pointer, length, data)) {
+        return {};
+    }
+    return data;
+}
+
+} // namespace
 
 KerberosWalker::KerberosWalker(
     const core::VirtualMemory& vmem,
@@ -181,22 +236,58 @@ void KerberosWalker::WalkKerberosTickets(
             vmem_.ReadStruct(current + tmpl_->ticket_buffer_ptr_offset,   &ticket_buffer);
 
             const auto ext_off = tmpl_->external_name_first_string_offset;
-            std::wstring service_name, target_name, client_name;
-            if (service_name_ptr != 0) service_name = ReadUnicodeString(vmem_, service_name_ptr + ext_off);
-            if (target_name_ptr  != 0) target_name  = ReadUnicodeString(vmem_, target_name_ptr  + ext_off);
-            if (client_name_ptr  != 0) client_name  = ReadUnicodeString(vmem_, client_name_ptr  + ext_off);
+            const auto service = ReadExternalName(vmem_, service_name_ptr, ext_off);
+            const auto target = ReadExternalName(vmem_, target_name_ptr, ext_off);
+            const auto client = ReadExternalName(vmem_, client_name_ptr, ext_off);
 
             if (ticket_len > 0 && ticket_len < 0x10000 && ticket_buffer != 0) {
                 std::vector<std::byte> ticket_data(ticket_len);
                 if (vmem_.ReadBytes(ticket_buffer, ticket_len, ticket_data)) {
                     security::KerberosTicket t;
-                    t.service_name = service_name;
-                    t.target_name  = target_name;
-                    t.client_name  = client_name;
+                    t.service = service;
+                    t.target = target;
+                    t.client = client;
+                    t.service_name = service.DisplayName();
+                    t.target_name = target.DisplayName();
+                    t.client_name = client.DisplayName();
                     t.flags        = ticket_flags;
+                    t.key_type     = key_type;
                     t.enc_type     = ticket_enc_type;
                     t.kvno         = ticket_kvno;
                     t.data         = std::move(ticket_data);
+
+                    if (tmpl_->ticket_domain_name_offset != 0) {
+                        t.domain_name = ReadUnicodeString(
+                            vmem_, current + tmpl_->ticket_domain_name_offset);
+                    }
+                    if (tmpl_->ticket_target_domain_offset != 0) {
+                        t.target_domain_name = ReadUnicodeString(
+                            vmem_, current + tmpl_->ticket_target_domain_offset);
+                    }
+                    if (tmpl_->ticket_alt_target_domain_offset != 0) {
+                        t.alt_target_domain_name = ReadUnicodeString(
+                            vmem_, current + tmpl_->ticket_alt_target_domain_offset);
+                    }
+                    if (tmpl_->ticket_key_len_offset != 0 &&
+                        tmpl_->ticket_key_ptr_offset != 0) {
+                        t.session_key = ReadBuffer(
+                            vmem_, current,
+                            tmpl_->ticket_key_len_offset,
+                            tmpl_->ticket_key_ptr_offset,
+                            0x1000);
+                    }
+                    if (tmpl_->ticket_start_time_offset != 0) {
+                        vmem_.ReadStruct(
+                            current + tmpl_->ticket_start_time_offset, &t.start_time);
+                    }
+                    if (tmpl_->ticket_end_time_offset != 0) {
+                        vmem_.ReadStruct(
+                            current + tmpl_->ticket_end_time_offset, &t.end_time);
+                    }
+                    if (tmpl_->ticket_renew_until_offset != 0) {
+                        vmem_.ReadStruct(
+                            current + tmpl_->ticket_renew_until_offset, &t.renew_until);
+                    }
                     cred.tickets.push_back(std::move(t));
                 }
             }

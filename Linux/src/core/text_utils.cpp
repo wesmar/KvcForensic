@@ -50,6 +50,10 @@ std::string utf16le_to_utf8(std::span<const std::byte> bytes) {
             }
         }
         if (u == 0) break;
+        if (u >= 0xD800 && u <= 0xDFFF) {
+            append_utf8(out, 0xFFFD);
+            continue;
+        }
         append_utf8(out, u);
     }
     return out;
@@ -72,6 +76,10 @@ std::string utf16le_to_utf8(const std::u16string& s) {
             }
         }
         if (u == 0) break;
+        if (u >= 0xD800 && u <= 0xDFFF) {
+            append_utf8(out, 0xFFFD);
+            continue;
+        }
         append_utf8(out, u);
     }
     return out;

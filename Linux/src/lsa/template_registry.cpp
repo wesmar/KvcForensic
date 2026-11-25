@@ -310,6 +310,14 @@ bool parse_kerberos(JsonCursor& c, KerberosTemplateSpec& s) {
         else if (k == "ticket_buffer_len_offset") { if (!c.parse_size(s.ticket_buffer_len_offset)) return false; }
         else if (k == "ticket_buffer_ptr_offset") { if (!c.parse_size(s.ticket_buffer_ptr_offset)) return false; }
         else if (k == "external_name_first_string_offset") { if (!c.parse_size(s.external_name_first_string_offset)) return false; }
+        else if (k == "ticket_domain_name_offset") { if (!c.parse_size(s.ticket_domain_name_offset)) return false; }
+        else if (k == "ticket_target_domain_offset") { if (!c.parse_size(s.ticket_target_domain_offset)) return false; }
+        else if (k == "ticket_alt_target_domain_offset") { if (!c.parse_size(s.ticket_alt_target_domain_offset)) return false; }
+        else if (k == "ticket_key_len_offset") { if (!c.parse_size(s.ticket_key_len_offset)) return false; }
+        else if (k == "ticket_key_ptr_offset") { if (!c.parse_size(s.ticket_key_ptr_offset)) return false; }
+        else if (k == "ticket_start_time_offset") { if (!c.parse_size(s.ticket_start_time_offset)) return false; }
+        else if (k == "ticket_end_time_offset") { if (!c.parse_size(s.ticket_end_time_offset)) return false; }
+        else if (k == "ticket_renew_until_offset") { if (!c.parse_size(s.ticket_renew_until_offset)) return false; }
         else if (!c.skip_value()) return false;
         if (c.consume('}')) return true;
         if (!c.expect(',')) return false;

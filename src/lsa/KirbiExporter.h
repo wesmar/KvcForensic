@@ -11,8 +11,8 @@ namespace KvcForensic::lsa {
 
 // Exports Kerberos tickets from a parsed dump to disk in two formats:
 //
-//   .kirbi  — KRB-CRED APPLICATION tag wrapping the raw Ticket DER bytes,
-//             compatible with Rubeus, mimikatz Pass-the-Ticket, and impacket.
+//   .kirbi  — KRB-CRED containing the DER Ticket and EncKrbCredPart metadata,
+//             compatible with mimikatz Pass-the-Ticket and impacket.
 //
 //   .ccache — MIT Kerberos credential cache v4, readable by impacket, krb5
 //             tools, and Linux kerberized applications directly.
@@ -40,6 +40,7 @@ public:
         const std::wstring& export_dir);
 
     // Build .kirbi bytes for a single ticket (exposed for testing).
+    // Export() uses the surrounding credential for realm/client fallbacks.
     static std::vector<std::uint8_t> BuildKirbi(const security::KerberosTicket& ticket);
 
     // Build .ccache bytes for a single credential entry (exposed for testing).

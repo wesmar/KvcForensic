@@ -4,11 +4,31 @@
 #include "core/HexUtils.h"
 #include "core/TextEncoding.h"
 
+#include <Windows.h>
+
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
 
 namespace KvcForensic::analysis {
+
+namespace {
+
+std::wstring FormatFiletime(const std::uint64_t filetime) {
+    if (filetime == 0) return {};
+    FILETIME ft{};
+    ft.dwLowDateTime = static_cast<DWORD>(filetime & 0xFFFFFFFFu);
+    ft.dwHighDateTime = static_cast<DWORD>(filetime >> 32);
+    SYSTEMTIME st{};
+    if (!::FileTimeToSystemTime(&ft, &st) || st.wYear < 1970) return {};
+
+    wchar_t text[32]{};
+    swprintf_s(text, L"%04u-%02u-%02uT%02u:%02u:%02uZ",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    return text;
+}
+
+} // namespace
 
 std::wstring BuildJsonReport(const SafeAnalysisReport& report) {
     std::wstringstream ss;
@@ -19,6 +39,19 @@ std::wstring BuildJsonReport(const SafeAnalysisReport& report) {
     auto JStr = [&](const std::wstring& v) { return L"\"" + EscapeJson(v) + L"\""; };
     auto JHex = [&](const std::vector<std::byte>& b) -> std::wstring {
         return b.empty() ? L"null" : L"\"" + core::BytesToHex(b) + L"\"";
+    };
+    auto JTime = [&](const std::uint64_t filetime) -> std::wstring {
+        const auto value = FormatFiletime(filetime);
+        return value.empty() ? L"null" : JStr(value);
+    };
+    auto JComponents = [&](const std::vector<std::wstring>& components) -> std::wstring {
+        std::wstring value = L"[";
+        for (std::size_t i = 0; i < components.size(); ++i) {
+            if (i != 0) value += L", ";
+            value += JStr(components[i]);
+        }
+        value += L"]";
+        return value;
     };
 
     // ── 1. SESSIONS (credentials) — most useful section, always first ──────
@@ -104,14 +137,31 @@ std::wstring BuildJsonReport(const SafeAnalysisReport& report) {
                 if (ti > 0) ss << L",\n";
                 ss << L"            {\n";
                 ss << L"              \"service\": " << JStr(t.service_name) << L",\n";
+                ss << L"              \"service_name_type\": " << std::dec << t.service.name_type << L",\n";
+                ss << L"              \"service_components\": " << JComponents(t.service.components) << L",\n";
                 ss << L"              \"target\": "  << JStr(t.target_name)  << L",\n";
+                ss << L"              \"target_name_type\": " << t.target.name_type << L",\n";
+                ss << L"              \"target_components\": " << JComponents(t.target.components) << L",\n";
                 ss << L"              \"client\": "  << JStr(t.client_name)  << L",\n";
+                ss << L"              \"client_name_type\": " << t.client.name_type << L",\n";
+                ss << L"              \"client_components\": " << JComponents(t.client.components) << L",\n";
+                ss << L"              \"domain\": " << JStr(t.domain_name) << L",\n";
+                ss << L"              \"target_domain\": " << JStr(t.target_domain_name) << L",\n";
+                ss << L"              \"alt_target_domain\": " << JStr(t.alt_target_domain_name) << L",\n";
                 ss << std::dec;
                 ss << L"              \"flags\": \"0x" << std::hex
                    << std::setfill(L'0') << std::setw(8) << t.flags << std::dec << L"\",\n";
+                ss << L"              \"key_type\": " << t.key_type << L",\n";
                 ss << L"              \"enc_type\": " << t.enc_type << L",\n";
                 ss << L"              \"kvno\": "     << t.kvno     << L",\n";
+                ss << L"              \"start_time\": " << JTime(t.start_time) << L",\n";
+                ss << L"              \"end_time\": " << JTime(t.end_time) << L",\n";
+                ss << L"              \"renew_until\": " << JTime(t.renew_until) << L",\n";
+                ss << L"              \"start_time_filetime\": " << t.start_time << L",\n";
+                ss << L"              \"end_time_filetime\": " << t.end_time << L",\n";
+                ss << L"              \"renew_until_filetime\": " << t.renew_until << L",\n";
                 ss << L"              \"size\": "     << t.data.size() << L",\n";
+                ss << L"              \"session_key\": " << JHex(t.session_key) << L",\n";
                 ss << L"              \"ticket\": \"" << core::BytesToHex(t.data) << L"\"\n";
                 ss << L"            }";
             }

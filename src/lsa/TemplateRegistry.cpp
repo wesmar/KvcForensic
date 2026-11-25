@@ -596,6 +596,22 @@ bool ParseKerberosTemplate(JsonCursor& c, KerberosTemplateSpec& spec) {
             if (!c.ParseSize(spec.ticket_buffer_ptr_offset)) return false;
         } else if (key == "external_name_first_string_offset") {
             if (!c.ParseSize(spec.external_name_first_string_offset)) return false;
+        } else if (key == "ticket_domain_name_offset") {
+            if (!c.ParseSize(spec.ticket_domain_name_offset)) return false;
+        } else if (key == "ticket_target_domain_offset") {
+            if (!c.ParseSize(spec.ticket_target_domain_offset)) return false;
+        } else if (key == "ticket_alt_target_domain_offset") {
+            if (!c.ParseSize(spec.ticket_alt_target_domain_offset)) return false;
+        } else if (key == "ticket_key_len_offset") {
+            if (!c.ParseSize(spec.ticket_key_len_offset)) return false;
+        } else if (key == "ticket_key_ptr_offset") {
+            if (!c.ParseSize(spec.ticket_key_ptr_offset)) return false;
+        } else if (key == "ticket_start_time_offset") {
+            if (!c.ParseSize(spec.ticket_start_time_offset)) return false;
+        } else if (key == "ticket_end_time_offset") {
+            if (!c.ParseSize(spec.ticket_end_time_offset)) return false;
+        } else if (key == "ticket_renew_until_offset") {
+            if (!c.ParseSize(spec.ticket_renew_until_offset)) return false;
         } else if (!c.SkipValue()) {
             return false;
         }
@@ -940,6 +956,26 @@ bool ValidateKerberosSpecs(const std::vector<KerberosTemplateSpec>& specs) {
             spec.ticket_buffer_len_offset == 0 ||
             spec.ticket_buffer_ptr_offset == 0 ||
             spec.external_name_first_string_offset == 0) {
+            return false;
+        }
+        const bool has_ticket_metadata =
+            spec.ticket_domain_name_offset != 0 ||
+            spec.ticket_target_domain_offset != 0 ||
+            spec.ticket_alt_target_domain_offset != 0 ||
+            spec.ticket_key_len_offset != 0 ||
+            spec.ticket_key_ptr_offset != 0 ||
+            spec.ticket_start_time_offset != 0 ||
+            spec.ticket_end_time_offset != 0 ||
+            spec.ticket_renew_until_offset != 0;
+        if (has_ticket_metadata &&
+            (spec.ticket_domain_name_offset == 0 ||
+             spec.ticket_target_domain_offset == 0 ||
+             spec.ticket_alt_target_domain_offset == 0 ||
+             spec.ticket_key_len_offset == 0 ||
+             spec.ticket_key_ptr_offset == 0 ||
+             spec.ticket_start_time_offset == 0 ||
+             spec.ticket_end_time_offset == 0 ||
+             spec.ticket_renew_until_offset == 0)) {
             return false;
         }
     }

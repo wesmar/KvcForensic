@@ -109,11 +109,6 @@ The following items are currently in progress and are treated as high-priority w
    - Scope: stabilize `tspkg_x64` template coverage across Windows build variants and improve walker robustness for list/sentinel edge cases.
    - Status: preliminary implementation is present (`tspkg_x64` templates, `TspkgWalker`, and session integration), with ongoing tuning and validation.
 
-2. **Kerberos ticket export (`.kirbi` / `.ccache`)**
-   - Goal: make ticket extraction operationally useful by exporting parsed tickets directly to standard formats.
-   - Scope: improve export completeness, compatibility, and handling of malformed/partial ticket data.
-   - Status: implementation exists and is being hardened for consistent cross-dump behavior.
-
 ---
 
 ## Obtaining the dump
@@ -219,7 +214,7 @@ Both formats are handled transparently during extraction.
 
 Kerberos stores sessions in an `RTL_AVL_TABLE`. The tree is traversed with an iterative DFS using an explicit `std::vector` stack rather than recursion, eliminating any risk of stack overflow on deep or corrupted trees. Visited nodes are tracked in a `std::unordered_set<uint64_t>`. For each node, the `OrderedPointer` field at node+32 yields the session pointer. The LUID is read at session+64; if that value does not match any known session LUID, a fallback probe over offsets {56, 48, 72, 40, 32} is performed.
 
-Kerberos ticket lists are extracted per session using offsets selected from the active `kerberos_x64` template. On the 24H2+ layout this corresponds to three lists at offsets `+280`, `+304`, and `+328` in `KIWI_KERBEROS_LOGON_SESSION_24H2`. Ticket metadata includes service name, target name, client name, flags, encryption type, kvno, and raw ticket bytes.
+Kerberos ticket lists are extracted per session using offsets selected from the active `kerberos_x64` template. On the 24H2+ layout this corresponds to three lists at offsets `+280`, `+304`, and `+328` in `KIWI_KERBEROS_LOGON_SESSION_24H2`. Ticket metadata includes every external-name component, realms, flags, encryption type, kvno, lifetime timestamps, session key bytes, and the encrypted ticket cipher.
 
 ### WDigest list walk
 
@@ -278,7 +273,7 @@ KvcForensic.exe --help
 
 `--full` -- include full metadata in the text report: dump header, stream list, module list, and security package presence checks. Without this flag, output contains only the credential header and logon sessions.
 
-`--export-tickets <dir>` -- export Kerberos tickets as `.kirbi` / `.ccache` files to the target directory. This feature is currently **in progress** and should be treated as **experimental**.
+`--export-tickets <dir>` -- export Kerberos tickets as standard `.kirbi` (KRB-CRED) and `.ccache` files to the target directory.
 
 `--help` / `-h` / `/?` -- print usage and exit.
 
@@ -297,7 +292,7 @@ KvcForensic.exe --analyze-dump --input dump.dmp --output result.txt --format bot
 # Override build detection with the current machine's build
 KvcForensic.exe --analyze-dump --input dump.dmp --force
 
-# Experimental: export Kerberos tickets to .kirbi/.ccache
+# Export Kerberos tickets to .kirbi/.ccache
 KvcForensic.exe --analyze-dump --input dump.dmp --export-tickets .\tickets
 
 # Run a command as TrustedInstaller
@@ -306,6 +301,16 @@ KvcForensic.exe -cli "powershell.exe -nop -ep bypass"
 ```
 
 When invoked without arguments, the graphical interface opens.
+
+Kerberos JSON output includes complete principals, realms, flags, lifetime
+timestamps, session key bytes, and the encrypted ticket cipher. The repository
+includes `tools/kvc_json_to_kirbi.py` for converting a ticket from JSON to
+KRB-CRED when the impacket Python package is available.
+
+The `ticket` hex field alone is the encrypted `Ticket.enc-part.cipher` value.
+It is not a complete `Ticket`, `KDC-REP`, or `.kirbi` blob. Use the exporter or
+the converter so the DER wrapper includes the matching session key and ticket
+metadata.
 
 ---
 

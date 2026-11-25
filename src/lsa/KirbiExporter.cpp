@@ -3,14 +3,45 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace KvcForensic::lsa {
+
+namespace {
+
+std::string WideToUtf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    const int need = ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(),
+        static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
+    if (need <= 0) return {};
+    std::string out(static_cast<std::size_t>(need), '\0');
+    ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(),
+        static_cast<int>(w.size()), out.data(), need, nullptr, nullptr);
+    return out;
+}
+
+std::vector<std::wstring> SplitKerberosName(const std::wstring& value) {
+    std::vector<std::wstring> components;
+    std::size_t start = 0;
+    while (start <= value.size()) {
+        const auto end = value.find(L'/', start);
+        const auto component = value.substr(
+            start, end == std::wstring::npos ? std::wstring::npos : end - start);
+        if (!component.empty()) components.push_back(component);
+        if (end == std::wstring::npos) break;
+        start = end + 1;
+    }
+    return components;
+}
+
+} // namespace
 
 // ============================================================================
 // Minimal DER / BER builder — no third-party library, BCrypt only.
@@ -83,8 +114,43 @@ static Bytes Integer(std::int64_t v) {
 
 // OCTET STRING
 static Bytes OctetString(const std::uint8_t* data, std::size_t len) {
-    Bytes inner(data, data + len);
+    Bytes inner;
+    if (data != nullptr && len != 0) inner.assign(data, data + len);
     return Tag(0x04, inner);
+}
+
+static Bytes GeneralString(const std::wstring& value) {
+    const std::string utf8 = WideToUtf8(value);
+    return Tag(0x1B, Bytes(utf8.begin(), utf8.end()));
+}
+
+static Bytes BitString32(const std::uint32_t value) {
+    Bytes inner(5);
+    inner[0] = 0x00;
+    inner[1] = static_cast<std::uint8_t>(value >> 24);
+    inner[2] = static_cast<std::uint8_t>((value >> 16) & 0xFF);
+    inner[3] = static_cast<std::uint8_t>((value >> 8) & 0xFF);
+    inner[4] = static_cast<std::uint8_t>(value & 0xFF);
+    return Tag(0x03, inner);
+}
+
+static std::optional<Bytes> GeneralizedTime(const std::uint64_t filetime) {
+    if (filetime == 0) return std::nullopt;
+
+    FILETIME ft{};
+    ft.dwLowDateTime = static_cast<DWORD>(filetime & 0xFFFFFFFFu);
+    ft.dwHighDateTime = static_cast<DWORD>(filetime >> 32);
+    SYSTEMTIME st{};
+    if (!::FileTimeToSystemTime(&ft, &st) || st.wYear < 1970) {
+        return std::nullopt;
+    }
+
+    char text[16]{};
+    const int written = std::snprintf(
+        text, sizeof(text), "%04u%02u%02u%02u%02u%02uZ",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    if (written != 15) return std::nullopt;
+    return Tag(0x18, Bytes(text, text + written));
 }
 
 static Bytes Concat(std::initializer_list<Bytes> parts) {
@@ -95,6 +161,141 @@ static Bytes Concat(std::initializer_list<Bytes> parts) {
 
 } // namespace der
 
+namespace {
+
+using der::Bytes;
+
+std::vector<std::wstring> ComponentsOrFallback(
+    const security::KerberosName& name,
+    const std::wstring& fallback) {
+    if (!name.components.empty()) return name.components;
+    return SplitKerberosName(fallback);
+}
+
+Bytes BuildPrincipalName(
+    const security::KerberosName& name,
+    const std::wstring& fallback,
+    const std::uint16_t fallback_type) {
+    const auto components = ComponentsOrFallback(name, fallback);
+    const std::vector<std::wstring> effective_components =
+        components.empty() ? std::vector<std::wstring>{L"unknown"} : components;
+
+    Bytes strings;
+    for (const auto& component : effective_components) {
+        const auto encoded = der::GeneralString(component);
+        strings.insert(strings.end(), encoded.begin(), encoded.end());
+    }
+
+    const auto name_type = name.name_type != 0 ? name.name_type : fallback_type;
+    return der::Sequence(der::Concat({
+        der::Ctx(0, der::Integer(name_type)),
+        der::Ctx(1, der::Sequence(strings))
+    }));
+}
+
+Bytes BuildEncryptionKey(const security::KerberosTicket& ticket) {
+    const auto key_type = ticket.key_type != 0 ? ticket.key_type : ticket.enc_type;
+    return der::Sequence(der::Concat({
+        der::Ctx(0, der::Integer(key_type)),
+        der::Ctx(1, der::OctetString(
+            reinterpret_cast<const std::uint8_t*>(ticket.session_key.data()),
+            ticket.session_key.size()))
+    }));
+}
+
+Bytes BuildEncryptedData(
+    const std::uint32_t etype,
+    const std::uint32_t kvno,
+    const std::vector<std::byte>& cipher) {
+    Bytes fields = der::Ctx(0, der::Integer(etype));
+    if (etype != 0) fields = der::Concat({fields, der::Ctx(1, der::Integer(kvno))});
+    fields = der::Concat({
+        std::move(fields),
+        der::Ctx(2, der::OctetString(
+            reinterpret_cast<const std::uint8_t*>(cipher.data()),
+            cipher.size()))
+    });
+    return der::Sequence(fields);
+}
+
+Bytes BuildTicket(
+    const security::KerberosTicket& ticket,
+    const security::KerberosCredential& cred) {
+    const auto realm_w = !ticket.domain_name.empty()
+        ? ticket.domain_name : cred.domainname;
+    const auto realm = realm_w.empty() ? std::wstring(L"UNKNOWN") : realm_w;
+    const auto service_name = BuildPrincipalName(ticket.service, ticket.service_name, 2);
+    const auto encrypted_data = BuildEncryptedData(
+        ticket.enc_type, ticket.kvno, ticket.data);
+    return der::App(1, der::Sequence(der::Concat({
+        der::Ctx(0, der::Integer(5)),
+        der::Ctx(1, der::GeneralString(realm)),
+        der::Ctx(2, service_name),
+        der::Ctx(3, encrypted_data)
+    })));
+}
+
+Bytes BuildEncKrbCredPart(
+    const security::KerberosTicket& ticket,
+    const security::KerberosCredential& cred) {
+    const auto prealm_w = !ticket.alt_target_domain_name.empty()
+        ? ticket.alt_target_domain_name : cred.domainname;
+    const auto srealm_w = !ticket.domain_name.empty()
+        ? ticket.domain_name : cred.domainname;
+    const auto prealm = prealm_w.empty() ? std::wstring(L"UNKNOWN") : prealm_w;
+    const auto srealm = srealm_w.empty() ? std::wstring(L"UNKNOWN") : srealm_w;
+
+    std::vector<Bytes> info_fields;
+    info_fields.push_back(der::Ctx(0, BuildEncryptionKey(ticket)));
+    info_fields.push_back(der::Ctx(1, der::GeneralString(prealm)));
+    info_fields.push_back(der::Ctx(2, BuildPrincipalName(ticket.client, cred.username, 1)));
+    info_fields.push_back(der::Ctx(3, der::BitString32(ticket.flags)));
+    if (const auto t = der::GeneralizedTime(ticket.start_time)) {
+        info_fields.push_back(der::Ctx(5, *t));
+    }
+    if (const auto t = der::GeneralizedTime(ticket.end_time)) {
+        info_fields.push_back(der::Ctx(6, *t));
+    }
+    if (const auto t = der::GeneralizedTime(ticket.renew_until)) {
+        info_fields.push_back(der::Ctx(7, *t));
+    }
+    info_fields.push_back(der::Ctx(8, der::GeneralString(srealm)));
+    info_fields.push_back(der::Ctx(
+        9, BuildPrincipalName(ticket.service, ticket.service_name, 2)));
+
+    Bytes info;
+    for (const auto& field : info_fields) {
+        info.insert(info.end(), field.begin(), field.end());
+    }
+    const auto ticket_info = der::Sequence(der::Sequence(info));
+    return der::App(29, der::Sequence(der::Ctx(0, ticket_info)));
+}
+
+Bytes BuildKirbiWithCredential(
+    const security::KerberosTicket& ticket,
+    const security::KerberosCredential& cred) {
+    using namespace der;
+    const Bytes pvno = Ctx(0, Integer(5));
+    const Bytes msg_type = Ctx(1, Integer(22));
+    const Bytes tickets = Ctx(2, Sequence(BuildTicket(ticket, cred)));
+    const Bytes cred_part = BuildEncKrbCredPart(ticket, cred);
+    const Bytes enc_part = Ctx(3, BuildEncryptedData(0, 0,
+        std::vector<std::byte>(
+            reinterpret_cast<const std::byte*>(cred_part.data()),
+            reinterpret_cast<const std::byte*>(cred_part.data() + cred_part.size()))));
+    return App(22, Sequence(Concat({pvno, msg_type, tickets, enc_part})));
+}
+
+std::uint32_t FiletimeToUnixSeconds(const std::uint64_t filetime) {
+    constexpr std::uint64_t kEpochDifference = 116444736000000000ULL;
+    if (filetime < kEpochDifference) return 0;
+    const auto seconds = (filetime - kEpochDifference) / 10000000ULL;
+    if (seconds > 0xFFFFFFFFULL) return 0;
+    return static_cast<std::uint32_t>(seconds);
+}
+
+} // namespace
+
 // ============================================================================
 // .kirbi format
 //
@@ -102,36 +303,28 @@ static Bytes Concat(std::initializer_list<Bytes> parts) {
 //     pvno      [0] INTEGER (5),
 //     msg-type  [1] INTEGER (22),
 //     tickets   [2] SEQUENCE OF Ticket,
-//     enc-part  [3] EncryptedData { etype=0, cipher='' }
+//     enc-part  [3] EncryptedData { etype=0, cipher=EncKrbCredPart }
 //   }
 //
-// The raw bytes in KerberosTicket::data are the DER-encoded Ticket value.
-// We wrap them as-is inside the SEQUENCE OF.
+// KerberosTicket::data contains only the encrypted Ticket.cipher value from
+// the LSA cache. The Ticket and clear-text EncKrbCredPart wrappers are built
+// here from the surrounding cache metadata.
 // ============================================================================
 std::vector<std::uint8_t> KirbiExporter::BuildKirbi(
     const security::KerberosTicket& ticket)
 {
-    using namespace der;
-
-    // pvno [0] = 5
-    const Bytes pvno = Ctx(0, Integer(5));
-    // msg-type [1] = 22 (KRB_CRED)
-    const Bytes msg_type = Ctx(1, Integer(22));
-
-    // tickets [2] — wrap raw DER ticket bytes inside SEQUENCE OF
-    Bytes ticket_inner(
-        reinterpret_cast<const std::uint8_t*>(ticket.data.data()),
-        reinterpret_cast<const std::uint8_t*>(ticket.data.data() + ticket.data.size()));
-    const Bytes tickets = Ctx(2, Sequence(ticket_inner));
-
-    // enc-part [3] — EncryptedData SEQUENCE { etype [0] = 0, cipher [2] = '' }
-    const Bytes enc_etype  = Ctx(0, Integer(0));
-    const Bytes enc_cipher = Ctx(2, OctetString(nullptr, 0));
-    const Bytes enc_part   = Ctx(3, Sequence(Concat({enc_etype, enc_cipher})));
-
-    const Bytes krb_cred_body = Sequence(Concat({pvno, msg_type, tickets, enc_part}));
-    // APPLICATION 22 = 0x60 | 22 = 0x76
-    return App(22, krb_cred_body);
+    // BuildKirbi is also used by unit tests with only the credential values
+    // embedded in the ticket, so keep a small local credential fallback.
+    security::KerberosCredential fallback_cred;
+    if (!ticket.alt_target_domain_name.empty()) {
+        fallback_cred.domainname = ticket.alt_target_domain_name;
+    } else if (!ticket.domain_name.empty()) {
+        fallback_cred.domainname = ticket.domain_name;
+    }
+    if (!ticket.client.components.empty()) {
+        fallback_cred.username = ticket.client.DisplayName();
+    }
+    return BuildKirbiWithCredential(ticket, fallback_cred);
 }
 
 // ============================================================================
@@ -173,17 +366,6 @@ static void AppendU32(std::vector<std::uint8_t>& v, std::uint32_t n) {
     v.push_back(static_cast<std::uint8_t>((n >> 16) & 0xFF));
     v.push_back(static_cast<std::uint8_t>((n >> 8) & 0xFF));
     v.push_back(static_cast<std::uint8_t>(n & 0xFF));
-}
-
-static std::string WideToUtf8(const std::wstring& w) {
-    if (w.empty()) return {};
-    const int need = ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(),
-        static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-    if (need <= 0) return {};
-    std::string out(static_cast<std::size_t>(need), '\0');
-    ::WideCharToMultiByte(CP_UTF8, 0, w.c_str(),
-        static_cast<int>(w.size()), out.data(), need, nullptr, nullptr);
-    return out;
 }
 
 static void AppendCountedOctet(std::vector<std::uint8_t>& v, const std::string& s) {
@@ -233,45 +415,62 @@ std::vector<std::uint8_t> KirbiExporter::BuildCcache(
     for (int i = 0; i < 8; ++i) out.push_back(0x00);  // all-zeros time offset
 
     // ── Default principal (client) ──────────────────────────────────────────
-    const std::string realm   = WideToUtf8(!cred.domainname.empty()
-                                            ? cred.domainname : L"UNKNOWN");
-    const std::string client  = WideToUtf8(!cred.username.empty()
-                                            ? cred.username : L"unknown");
+    const std::wstring client_realm_w =
+        !ticket.alt_target_domain_name.empty()
+            ? ticket.alt_target_domain_name
+            : (!cred.domainname.empty() ? cred.domainname : L"UNKNOWN");
+    const std::wstring server_realm_w =
+        !ticket.domain_name.empty()
+            ? ticket.domain_name
+            : (!cred.domainname.empty() ? cred.domainname : L"UNKNOWN");
+    const std::string realm = WideToUtf8(client_realm_w);
+    const std::string server_realm = WideToUtf8(server_realm_w);
+
+    std::vector<std::string> client_parts;
+    for (const auto& component :
+         ComponentsOrFallback(ticket.client, cred.username)) {
+        client_parts.push_back(WideToUtf8(component));
+    }
+    if (client_parts.empty()) client_parts.push_back("unknown");
+
     // NT_PRINCIPAL = 1
-    AppendPrincipal(out, realm, {client}, 1);
+    AppendPrincipal(out, realm, client_parts, 1);
 
     // ── Credential record ───────────────────────────────────────────────────
 
     // client principal (same as default)
-    AppendPrincipal(out, realm, {client}, 1);
+    AppendPrincipal(out, realm, client_parts, 1);
 
     // server/service principal
-    const std::string svc = WideToUtf8(!ticket.service_name.empty()
-                                        ? ticket.service_name : L"unknown");
     // NT_SRV_INST = 2; split on '/' for host components if present.
     std::vector<std::string> svc_parts;
-    {
-        std::string s = svc;
-        std::size_t pos = 0;
-        while ((pos = s.find('/')) != std::string::npos) {
-            svc_parts.push_back(s.substr(0, pos));
-            s = s.substr(pos + 1);
-        }
-        svc_parts.push_back(s);
+    for (const auto& component :
+         ComponentsOrFallback(ticket.service, ticket.service_name)) {
+        svc_parts.push_back(WideToUtf8(component));
     }
-    AppendPrincipal(out, realm, svc_parts, 2);
+    if (svc_parts.empty()) svc_parts.push_back("unknown");
+    const std::uint32_t service_type =
+        ticket.service.name_type != 0 ? ticket.service.name_type : 2;
+    AppendPrincipal(out, server_realm, svc_parts, service_type);
 
     // keyblock: etype (2 bytes) + etype again (2 bytes, legacy) + key bytes
-    // We have no key material, so write enc_type and empty key.
-    AppendU16(out, static_cast<std::uint16_t>(ticket.enc_type));
-    AppendU16(out, static_cast<std::uint16_t>(ticket.enc_type));
-    AppendU32(out, 0);  // key length = 0 (no key)
+    const auto key_type = static_cast<std::uint16_t>(
+        ticket.key_type != 0 ? ticket.key_type : ticket.enc_type);
+    AppendU16(out, key_type);
+    AppendU16(out, key_type);
+    const auto key_length = static_cast<std::uint16_t>(
+        (std::min)(ticket.session_key.size(), static_cast<std::size_t>(0xFFFF)));
+    AppendU16(out, key_length);
+    if (key_length != 0) {
+        out.insert(out.end(),
+            reinterpret_cast<const std::uint8_t*>(ticket.session_key.data()),
+            reinterpret_cast<const std::uint8_t*>(ticket.session_key.data()) + key_length);
+    }
 
-    // Timestamps (all zero — we don't have them from the dump)
-    AppendU32(out, 0);  // auth_time
-    AppendU32(out, 0);  // start_time
-    AppendU32(out, 0);  // end_time
-    AppendU32(out, 0);  // renew_till
+    AppendU32(out, FiletimeToUnixSeconds(ticket.start_time));  // auth_time
+    AppendU32(out, FiletimeToUnixSeconds(ticket.start_time));
+    AppendU32(out, FiletimeToUnixSeconds(ticket.end_time));
+    AppendU32(out, FiletimeToUnixSeconds(ticket.renew_until));
 
     out.push_back(0);   // is_skey = false
 
@@ -284,10 +483,9 @@ std::vector<std::uint8_t> KirbiExporter::BuildCcache(
     // authdata count = 0
     AppendU32(out, 0);
 
-    // ticket bytes (the raw DER Ticket)
-    AppendCountedOctet(out,
-        reinterpret_cast<const std::uint8_t*>(ticket.data.data()),
-        ticket.data.size());
+    // ccache stores the plain DER Ticket, not the encrypted cipher alone.
+    const auto ticket_der = BuildTicket(ticket, cred);
+    AppendCountedOctet(out, ticket_der.data(), ticket_der.size());
 
     // second_ticket: empty
     AppendU32(out, 0);
@@ -376,6 +574,10 @@ ExportStats KirbiExporter::Export(
         for (const auto& cred : session.kerberos_credentials) {
             for (const auto& ticket : cred.tickets) {
                 if (ticket.data.empty()) continue;
+                if (ticket.session_key.empty()) {
+                    ++stats.errors;
+                    continue;
+                }
 
                 const std::wstring base = BuildTicketBaseName(
                     session, cred, ticket, global_idx++);
@@ -385,7 +587,7 @@ ExportStats KirbiExporter::Export(
 
                 // .kirbi
                 {
-                    const auto kirbi = BuildKirbi(ticket);
+                    const auto kirbi = BuildKirbiWithCredential(ticket, cred);
                     const std::wstring path = dir + base + L".kirbi";
                     if (WriteFile(path, kirbi))
                         ++stats.kirbi_written;

@@ -2,6 +2,7 @@
 
 #include "core/text_utils.h"
 
+#include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -48,6 +49,24 @@ std::string secret_text(std::string_view text, bool reveal) {
     if (text.empty()) return {};
     if (!reveal) return kRedacted;
     return std::string(text);
+}
+
+std::uint32_t filetime_to_unix_seconds(std::uint64_t filetime) {
+    constexpr std::uint64_t kEpochDifference = 116444736000000000ULL;
+    if (filetime < kEpochDifference) return 0;
+    const auto seconds = (filetime - kEpochDifference) / 10000000ULL;
+    return seconds > 0xFFFFFFFFULL ? 0 : static_cast<std::uint32_t>(seconds);
+}
+
+std::string format_filetime(std::uint64_t filetime) {
+    const auto seconds = filetime_to_unix_seconds(filetime);
+    if (seconds == 0) return {};
+    const auto value = static_cast<std::time_t>(seconds);
+    std::tm utc{};
+    if (::gmtime_r(&value, &utc) == nullptr) return {};
+    char text[32]{};
+    if (std::strftime(text, sizeof(text), "%Y-%m-%dT%H:%M:%SZ", &utc) == 0) return {};
+    return text;
 }
 
 } // namespace
@@ -191,6 +210,19 @@ std::string ReportBuilder::build_json(const AnalysisResult& r, const ReportOptio
         if (!reveal) return "\"" + std::string(kRedacted) + "\"";
         return "\"" + json_escape(t) + "\"";
     };
+    auto time_or_null = [&](std::uint64_t filetime) -> std::string {
+        const auto value = format_filetime(filetime);
+        return value.empty() ? "null" : "\"" + value + "\"";
+    };
+    auto components_json = [&](const std::vector<std::string>& components) {
+        std::string value = "[";
+        for (std::size_t i = 0; i < components.size(); ++i) {
+            if (i != 0) value += ", ";
+            value += "\"" + json_escape(components[i]) + "\"";
+        }
+        value += "]";
+        return value;
+    };
 
     std::ostringstream out;
     out << "{\n";
@@ -269,7 +301,39 @@ std::string ReportBuilder::build_json(const AnalysisResult& r, const ReportOptio
             out << (j ? "," : "") << "{\"user\":\"" << json_escape(c.username)
                 << "\",\"domain\":\"" << json_escape(c.domainname)
                 << "\",\"password\":" << text_or_null(c.password)
-                << ",\"tickets\":" << c.tickets.size() << "}";
+                << ",\"tickets\":[";
+            for (std::size_t k = 0; k < c.tickets.size(); ++k) {
+                const auto& t = c.tickets[k];
+                out << (k ? "," : "") << "{";
+                out << "\"service\":\"" << json_escape(t.service_name) << "\",";
+                out << "\"service_name_type\":" << t.service.name_type << ",";
+                out << "\"service_components\":" << components_json(t.service.components) << ",";
+                out << "\"target\":\"" << json_escape(t.target_name) << "\",";
+                out << "\"target_name_type\":" << t.target.name_type << ",";
+                out << "\"target_components\":" << components_json(t.target.components) << ",";
+                out << "\"client\":\"" << json_escape(t.client_name) << "\",";
+                out << "\"client_name_type\":" << t.client.name_type << ",";
+                out << "\"client_components\":" << components_json(t.client.components) << ",";
+                out << "\"domain\":\"" << json_escape(t.domain_name) << "\",";
+                out << "\"target_domain\":\"" << json_escape(t.target_domain_name) << "\",";
+                out << "\"alt_target_domain\":\"" << json_escape(t.alt_target_domain_name) << "\",";
+                out << "\"flags\":\"0x" << std::hex << std::setw(8) << std::setfill('0')
+                    << t.flags << std::dec << "\",";
+                out << "\"key_type\":" << t.key_type << ",";
+                out << "\"enc_type\":" << t.enc_type << ",";
+                out << "\"kvno\":" << t.kvno << ",";
+                out << "\"start_time\":" << time_or_null(t.start_time) << ",";
+                out << "\"end_time\":" << time_or_null(t.end_time) << ",";
+                out << "\"renew_until\":" << time_or_null(t.renew_until) << ",";
+                out << "\"start_time_filetime\":" << t.start_time << ",";
+                out << "\"end_time_filetime\":" << t.end_time << ",";
+                out << "\"renew_until_filetime\":" << t.renew_until << ",";
+                out << "\"size\":" << t.data.size() << ",";
+                out << "\"session_key\":" << hex_or_null(t.session_key) << ",";
+                out << "\"ticket\":" << hex_or_null(t.data);
+                out << "}";
+            }
+            out << "]}";
         }
         out << "],\n";
         out << "      \"dpapi\": [";
