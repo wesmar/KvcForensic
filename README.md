@@ -1,5 +1,48 @@
 ## 📋 Changelog
 
+**[25.11.2026]**
+
+<details>
+<summary><strong>🧾 Correct Kerberos ticket export, complete ticket metadata, and JSON-to-KRB-CRED conversion</strong></summary>
+
+<br>
+
+Kerberos ticket parsing now preserves every external-name component, realms, flags, key type,
+session key, ticket encryption type, KVNO, and lifetime timestamps. The raw LSA cache value is
+correctly treated as `Ticket.enc-part.cipher` and wrapped into a complete DER `Ticket`.
+
+`--export-tickets` now writes valid KRB-CRED and MIT ccache v4 files. The ccache key length uses
+the v4 16-bit field, timestamps are converted from FILETIME to Unix time, and the cache stores
+the complete DER ticket instead of the bare cipher. `tools/kvc_json_to_kirbi.py` can also build
+KRB-CRED directly from the enriched JSON output.
+
+<details>
+<summary><strong>🖥️ Modern native GUI with Mica, dark mode, Direct2D, and restored window layout</strong></summary>
+
+The GUI now uses Direct2D and DirectWrite for the menu, status bar, pane separators, and popup
+menus. It follows the Windows light/dark app theme and uses a Mica backdrop on Windows 11.
+
+The process is Per-Monitor V2 DPI aware. Window position, size, maximized state, and splitter
+position are restored from `HKCU\Software\KVC\KvcForensic`. Tree and detail panes use
+theme-aware backgrounds, headers, gridlines, and selection colors.
+
+</details>
+
+<details>
+<summary><strong>🐧 Linux CLI — one static musl binary, no runtime dependencies</strong></summary>
+
+The Linux build is now distributed as a single static executable built with Zig, libc++ and
+musl. It does not require glibc, `libcrypto`, or any other shared library at runtime.
+
+Additional Windows/Linux parity validation for this change covered builds `26100` and `26300`.
+Those results matched after normalizing the JSON field naming used by each frontend, including
+all credential packages and complete Kerberos ticket metadata. This is additional coverage; the
+existing validation set and supported-build history below remain unchanged.
+
+</details>
+
+</details>
+
 **[14.05.2026]**
 
 <details>
@@ -69,11 +112,12 @@ matches the Windows build 1:1.
 ![KvcForensic](images/KvcForensic.jpg)
 
 Windows LSA credential parser for `lsass.dmp` minidumps.
-Active support targets: **Windows 10 1703-22H2** and **Windows 11 21H2 / 22H2 / 24H2 / 25H2 / 26H1**, plus **Windows Server 2025**. Current in-repo validation covers legacy Win10 builds `15063/16299/17134/17763`, Win10 `19045`, Win11 `22000/22621`, and ticket-bearing Win11 `26100/26200/28000` dumps.
+Active support targets: **Windows 10 1703-22H2** and **Windows 11 21H2 / 22H2 / 24H2 / 25H2 / 26H1**, plus **Windows Server 2025**. Current in-repo validation covers legacy Win10 builds `15063/16299/17134/17763`, Win10 `19045`, Win11 `22000/22621`, `26300`, and ticket-bearing Win11 `26100/26200/28000` dumps.
 
-Built entirely on pure Win32 API. No runtime dependencies beyond the OS and the BCrypt primitive. No DbgHelp, no third-party libraries, no framework.
+Built entirely on pure Win32 API. No runtime dependencies beyond the OS and the BCrypt primitive. No DbgHelp, no third-party libraries, no framework. The Linux CLI is a single fully static musl executable.
 
-Binary size is under 400 KB when linked against the system CRT, and under 700 KB with the CRT statically embedded.
+The Windows executable is under 700 KB with the CRT statically embedded. The stripped static
+Linux executable is approximately 6.2 MiB.
 
 ---
 
@@ -341,9 +385,10 @@ When the parser must use heuristic layout recovery (template mismatch or runtime
 ## Build requirements
 
 - Windows 11 SDK (build 26100 or later recommended)
-- MSVC or Clang-cl, C++20
+- MSVC or Clang-cl, C++20 or later
 - x64 only
-- Link: `bcrypt.lib`, `advapi32.lib`, `shell32.lib`
+- Link: `bcrypt.lib`, `advapi32.lib`, `shell32.lib`, `comdlg32.lib`, `d2d1.lib`,
+  `dwrite.lib`, `dwmapi.lib`, `uxtheme.lib`
 
 ---
 
@@ -365,7 +410,7 @@ Full credential extraction (NT hash, plaintext passwords, DPAPI master keys) req
 
 Template entries for session discovery span Windows 7 (7600) through Windows 11 26H1. Legacy LSA decryption is now validated from build `15063` upward; builds below `15063` remain template-only / experimental. Output for unsupported builds will contain session metadata (LUID, username, domain, SID) where the layout detection heuristic succeeds, but credential fields will usually remain empty.
 
-Primary development and validation targets are Windows 11 26H1 (build 28000), Windows 11 25H2 (build 26200), Windows 11 24H2 (build 26100), Windows 11 21H2/22H2, and the legacy Windows 10 checkpoints spanning 1703 through 22H2.
+Primary development and validation targets are Windows 11 26H1 (build 28000), Windows 11 25H2 (build 26200), Windows 11 24H2 (build 26100), Windows 11 build 26300, Windows 11 21H2/22H2, and the legacy Windows 10 checkpoints spanning 1703 through 22H2.
 
 ---
 

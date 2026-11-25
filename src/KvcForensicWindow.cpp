@@ -792,8 +792,11 @@ void KvcForensicWindow::LayoutControls(int w, int h) {
         const int dw = std::max(0, w - pad - dx - 1);
         ::MoveWindow(detail_, dx, top, dw, content_h, TRUE);
 
+        RECT detail_rc{};
+        ::GetClientRect(detail_, &detail_rc);
+        const int client_w = detail_rc.right - detail_rc.left;
         const int prop_w = fonts_.S(180);
-        const int val_w  = std::max(fonts_.S(80), dw - prop_w - fonts_.S(6));
+        const int val_w  = std::max(fonts_.S(80), client_w - prop_w);
         ListView_SetColumnWidth(detail_, 0, prop_w);
         ListView_SetColumnWidth(detail_, 1, val_w);
     }
@@ -938,7 +941,36 @@ LRESULT KvcForensicWindow::HandleHeaderCustomDraw(NMCUSTOMDRAW* cd) {
         ::LineTo(cd->hdc, hdr_rc.right, hdr_rc.bottom - 1);
         ::SelectObject(cd->hdc, old_pen);
         ::DeleteObject(pen);
-        return CDRF_NOTIFYITEMDRAW;
+        return CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT;
+    }
+
+    if (cd->dwDrawStage == CDDS_POSTPAINT) {
+        // SysHeader32 paints any trailing area right of the last column using the
+        // light system theme after item drawing; overpaint it in the active palette.
+        RECT hdr_rc{};
+        ::GetClientRect(cd->hdr.hwndFrom, &hdr_rc);
+        int tail_left = hdr_rc.left;
+        const int count = Header_GetItemCount(cd->hdr.hwndFrom);
+        if (count > 0) {
+            RECT last_rc{};
+            if (Header_GetItemRect(cd->hdr.hwndFrom, count - 1, &last_rc)) {
+                tail_left = last_rc.right;
+            }
+        }
+        if (tail_left < hdr_rc.right) {
+            RECT tail_rc{ tail_left, hdr_rc.top, hdr_rc.right, hdr_rc.bottom };
+            HBRUSH br = ::CreateSolidBrush(bg);
+            ::FillRect(cd->hdc, &tail_rc, br);
+            ::DeleteObject(br);
+
+            HPEN pen = ::CreatePen(PS_SOLID, 1, line);
+            HGDIOBJ old_pen = ::SelectObject(cd->hdc, pen);
+            ::MoveToEx(cd->hdc, tail_rc.left, tail_rc.bottom - 1, nullptr);
+            ::LineTo(cd->hdc, tail_rc.right, tail_rc.bottom - 1);
+            ::SelectObject(cd->hdc, old_pen);
+            ::DeleteObject(pen);
+        }
+        return CDRF_DODEFAULT;
     }
 
     if (cd->dwDrawStage == CDDS_ITEMPREPAINT) {

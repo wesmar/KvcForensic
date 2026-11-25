@@ -11,6 +11,7 @@ the Windows build 1:1 — same NT/SHA1 hashes, same DPAPI master-key GUIDs.
 
 - C++23 toolchain (gcc 13+ / clang 16+)
 - OpenSSL libcrypto headers (Debian/Ubuntu: `libssl-dev`, Fedora: `openssl-devel`)
+- Zig 0.14+, musl and OpenSSL source when reproducing the static musl release build
 - POSIX (uses `mmap` for zero-copy dump access)
 
 ## Build
@@ -30,6 +31,20 @@ make -C linux-cli -j
 
 Binary lands at `linux-cli/kvcforensic-linux` (make) or
 `linux-cli/build/kvcforensic-linux` (cmake).
+
+Static musl release binary:
+
+```bash
+zig c++ -target x86_64-linux-musl -std=c++23 -O2 \
+    -ffunction-sections -fdata-sections -DNDEBUG \
+    -Isrc -I<openssl-build>/include -I<openssl-source>/include \
+    <sources> <openssl-build>/libcrypto.a \
+    -static -Wl,--gc-sections -o bin/KvcForensic
+strip --strip-all bin/KvcForensic
+```
+
+The release binary is statically linked, includes libc++ and OpenSSL, and has no runtime
+library dependencies.
 
 ## Usage
 
@@ -106,5 +121,8 @@ linux-cli/tests/run_dumps.sh
 ```
 
 Tested against Windows builds 19045 (Win10 22H2), 26100 (24H2), 26200 (25H2),
-28000 (26H1). NT hashes and DPAPI master-key GUIDs match the Windows
-reference outputs byte-for-byte on the same dumps.
+26300, and 28000 (26H1). NT hashes and DPAPI master-key GUIDs match the Windows
+reference outputs byte-for-byte on the same dumps. The `26100` and `26300`
+comparisons additionally covered every credential package, and complete
+Kerberos ticket metadata matched after normalizing frontend-specific JSON
+field names.
